@@ -134,6 +134,7 @@ export interface Env {
 }
 
 export interface PlaybackTokenPayload {
+  playbackId?: string;
   stationId: string;
   resolvedAreaId: string;
   authToken: string;

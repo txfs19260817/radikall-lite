@@ -108,6 +108,57 @@ test('extensionless playlists requested with a bounded Range are refetched whole
   assert.equal(response.headers.get('Accept-Ranges'), null);
 });
 
+test('upstream failures carry safe request IDs and distinguish auth1, auth2 and stream lookup', async context => {
+  const logs: string[] = [];
+  context.mock.method(console, 'error', (line: string) => logs.push(line));
+  context.mock.method(console, 'warn', () => {});
+  for (const stage of ['auth1', 'auth2', 'stream lookup']) {
+    const mockedFetch = context.mock.method(globalThis, 'fetch', async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (stage === 'stream lookup' && url.includes('/station/stream/')) {
+        const error = new TypeError('https://radiko.jp/?secret=DO_NOT_LOG', { cause: { code: 'ENOTFOUND' } });
+        throw error;
+      }
+      if (url.endsWith('/auth1')) return new Response('DO_NOT_LOG', { status: stage === 'auth1' ? 403 : 200,
+        headers: { 'x-radiko-authtoken': 'DO_NOT_LOG', 'x-radiko-keyoffset': '0', 'x-radiko-keylength': '8', 'Content-Type': 'text/plain' } });
+      if (url.endsWith('/auth2')) return new Response('DO_NOT_LOG', { status: stage === 'auth2' ? 403 : 200, headers: { 'Content-Type': 'text/plain' } });
+      return new Response('<xml/>');
+    });
+    const response = await createHandler()(post({ stationId: 'FMJ' }), env);
+    const body = await response.json();
+    assert.equal(response.status, 502);
+    assert.match(body.requestId, /^[\da-f-]{36}$/);
+    assert.equal(response.headers.get('X-Request-ID'), body.requestId);
+    const log = JSON.parse(logs.at(-1)!);
+    assert.equal(log.stage, stage); assert.equal(log.stationId, 'FMJ');
+    assert.equal(log.host, 'radiko.jp'); assert.equal(log.requestId, body.requestId);
+    assert.equal(log.errorCode, stage === 'stream lookup' ? 'ENOTFOUND' : 'UPSTREAM_HTTP');
+    assert.ok(Number.isFinite(log.elapsedMs));
+    assert.ok(!JSON.stringify([body, logs]).includes('DO_NOT_LOG'));
+    mockedFetch.mock.restore();
+  }
+});
+
+test('media errors correlate to the session without leaking tokens, URLs, headers or error text', async context => {
+  const logs: string[] = [];
+  context.mock.method(console, 'error', (line: string) => logs.push(line));
+  const handle = createHandler({ ...stub, fetchUpstream: async () => new Response('private-body', {
+    headers: { 'Content-Type': 'application/x-mpegURL; secret=private-header' },
+  }) });
+  const session = await (await handle(post({ stationId: 'FMJ' }), env)).json();
+  const token = session.streamUrl.split('/')[4];
+  const target = 'https://example.smartstream.ne.jp/medialist?signature=private-signature';
+  const response = await handle(new Request(`https://radio.test/api/playback/live/${token}/proxy?target=${encodeURIComponent(target)}`), env);
+  const body = await response.json(), log = JSON.parse(logs.at(-1)!);
+  assert.equal(response.status, 502); assert.equal(log.stage, 'media');
+  assert.equal(log.playbackId, session.playbackId); assert.ok(session.playbackId);
+  assert.equal(log.requestId, body.requestId); assert.equal(log.upstreamStatus, 200);
+  assert.equal(log.contentType, 'application/x-mpegurl'); assert.equal(log.errorCode, 'INVALID_PLAYLIST');
+  for (const secret of [token, payload.authToken, 'private-body', 'private-header', 'private-signature']) {
+    assert.ok(!JSON.stringify([body, logs]).includes(secret));
+  }
+});
+
 test('redirect validation prevents forwarding authentication to another host', async context => {
   let calls = 0;
   context.mock.method(globalThis, 'fetch', async () => { calls++; return new Response(null, { status: 302, headers: { Location: 'https://evil.test/steal' } }); });

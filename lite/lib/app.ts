@@ -5,6 +5,7 @@ import { buildNowPlayingResponse, buildScheduleResponse } from './program.ts';
 import { buildLiveStreamUrl } from './stream.ts';
 import { fetchUpstream, isAllowedUrl } from './network.ts';
 import type { PlaybackTokenPayload } from './types.ts';
+import { atStage, logFailure, noteResponse, StageError, type Diagnostic } from './diagnostics.ts';
 
 export type Settings = { RADIKALL_SESSION_SECRET?: string };
 const TTL = 55 * 60_000;
@@ -15,7 +16,8 @@ const json = (body: unknown, status = 200, cache = 'no-store') => Response.json(
 });
 class HttpError extends Error {
   status: number;
-  constructor(status: number, message: string) { super(message); this.status = status; }
+  code: string;
+  constructor(status: number, message: string, code = 'HTTP_ERROR') { super(message); this.status = status; this.code = code; }
 }
 
 // Bounded, best-effort cache. Correctness never depends on a warm instance.
@@ -54,7 +56,7 @@ async function smallJson(request: Request): Promise<Record<string, unknown>> {
 export function rewritePlaylist(token: string, base: string, text: string): string {
   const proxied = (value: string) => {
     const target = new URL(value, base).href;
-    if (!isAllowedUrl(target)) throw new HttpError(502, '音频地址不在允许的上游列表中。');
+    if (!isAllowedUrl(target)) throw new HttpError(502, '音频地址不在允许的上游列表中。', 'URL_NOT_ALLOWED');
     return `/api/playback/live/${encodeURIComponent(token)}/proxy?target=${encodeURIComponent(target)}`;
   };
   return text.split('\n').map(line => {
@@ -71,6 +73,7 @@ export function createHandler(overrides: Partial<Dependencies> = {}) {
   const nowPlaying = cached(services.buildNowPlayingResponse, 45_000);
   const schedule = cached(services.buildScheduleResponse, 300_000);
   return async function handle(request: Request, env: Settings = {}): Promise<Response> {
+    const trace: Diagnostic = { requestId: crypto.randomUUID(), stage: 'request', startedAt: performance.now() };
     try {
       const url = new URL(request.url), path = url.pathname;
       if (path === '/health' || path === '/api/health') return json({ status: 'ok', configured: (env.RADIKALL_SESSION_SECRET?.length ?? 0) >= 32 });
@@ -88,17 +91,23 @@ export function createHandler(overrides: Partial<Dependencies> = {}) {
         const body = await smallJson(request);
         if (typeof body.stationId !== 'string' || !stationById.has(body.stationId)) throw new HttpError(400, '请选择有效电台。');
         const station = stationById.get(body.stationId)!;
+        trace.stationId = station.id; trace.stage = 'session'; trace.playbackId = trace.requestId;
         const area = typeof body.preferredAreaId === 'string' ? body.preferredAreaId : station.areaIds[0]!;
         if (!Object.hasOwn(gpsCoordinates, area) || !station.areaIds.includes(area)) throw new HttpError(400, '电台与地区不匹配。');
         const secret = requireSecret(env);
-        const [auth, stream] = await Promise.all([services.authenticate(area), services.buildLiveStreamUrl(station.id)]);
-        if (!isAllowedUrl(stream)) throw new HttpError(502, '上游播放地址无效。');
+        const [auth, stream] = await Promise.all([
+          atStage(trace, 'auth1', child => services.authenticate(area, child)),
+          atStage(trace, 'stream lookup', child => services.buildLiveStreamUrl(station.id, child)),
+        ]);
+        if (!isAllowedUrl(stream)) throw new HttpError(502, '上游播放地址无效。', 'URL_NOT_ALLOWED');
         const issuedAtEpochMillis = Date.now(), expiresAtEpochMillis = issuedAtEpochMillis + TTL;
         const token = await encryptPlaybackToken(secret, {
-          stationId: station.id, resolvedAreaId: auth.areaId, authToken: auth.token,
+          playbackId: trace.playbackId, stationId: station.id, resolvedAreaId: auth.areaId, authToken: auth.token,
           userAgent: auth.userAgent, upstreamMasterUrl: stream, issuedAtEpochMillis, expiresAtEpochMillis,
         });
-        return json({ stationId: station.id, expiresAtEpochMillis, streamUrl: `/api/playback/live/${token}/master.m3u8` });
+        const response = json({ playbackId: trace.playbackId, stationId: station.id, expiresAtEpochMillis, streamUrl: `/api/playback/live/${token}/master.m3u8` });
+        response.headers.set('X-Request-ID', trace.requestId);
+        return response;
       }
       const playback = path.match(/^\/api\/playback\/live\/([^/]+)\/(master\.m3u8|proxy)$/);
       if (playback && request.method === 'GET') {
@@ -107,15 +116,22 @@ export function createHandler(overrides: Partial<Dependencies> = {}) {
         if (!session || !Number.isFinite(session.expiresAtEpochMillis) || Date.now() >= session.expiresAtEpochMillis) {
           throw new HttpError(410, '播放会话已过期，请重新播放。');
         }
+        trace.stationId = session.stationId; trace.playbackId = session.playbackId;
+        trace.stage = playback[2] === 'master.m3u8' ? 'master' : 'segment';
         const target = playback[2] === 'master.m3u8' ? session.upstreamMasterUrl : url.searchParams.get('target');
         if (!target || !isAllowedUrl(target)) throw new HttpError(400, '不支持的音频地址。');
-        return await proxy(request, session, token, target, services.fetchUpstream);
+        trace.host = new URL(target).hostname;
+        return await proxy(request, session, token, target, services.fetchUpstream, trace);
       }
       return json({ message: '找不到这个接口。' }, 404);
     } catch (error) {
-      if (error instanceof HttpError) return json({ message: error.message }, error.status);
+      const cause = error instanceof StageError ? error.cause : error;
+      const status = cause instanceof HttpError ? cause.status : 502;
+      if (status >= 500) logFailure(trace, error);
       // Never display upstream HTML, authentication tokens or full proxy URLs.
-      return json({ message: '暂时无法连接电台服务，请稍后重试。' }, 502);
+      const response = json({ message: cause instanceof HttpError ? cause.message : '暂时无法连接电台服务，请稍后重试。', requestId: trace.requestId }, status);
+      response.headers.set('X-Request-ID', trace.requestId);
+      return response;
     }
   };
 }
@@ -126,30 +142,34 @@ function requireSecret(env: Settings): string {
   return secret;
 }
 
-async function proxy(request: Request, session: PlaybackTokenPayload, token: string, target: string, fetcher: Dependencies['fetchUpstream']) {
+async function proxy(request: Request, session: PlaybackTokenPayload, token: string, target: string, fetcher: Dependencies['fetchUpstream'], trace: Diagnostic) {
   const headers = new Headers({ 'X-Radiko-AuthToken': session.authToken, 'X-Radiko-AreaId': session.resolvedAreaId, 'User-Agent': session.userAgent });
   const playlistPath = new URL(target).pathname.endsWith('.m3u8');
+  if (trace.stage !== 'master' && (playlistPath || new URL(target).pathname.endsWith('/medialist'))) trace.stage = 'media';
   const range = request.headers.get('range');
   // Native HLS probes with bytes=0-. Radiko's extensionless /medialist
   // responds to that with literal "200 OK" instead of a playlist.
   // A full-file range needs no forwarding; keep real segment byte ranges.
   if (range && range !== 'bytes=0-' && !playlistPath) headers.set('Range', range);
-  let upstream = await fetcher(target, { headers, signal: request.signal });
+  let upstream = await fetcher(target, { headers, signal: request.signal }, trace);
+  noteResponse(trace, upstream);
+  if (trace.stage !== 'master' && /mpegurl/i.test(upstream.headers.get('content-type') ?? '')) trace.stage = 'media';
   if (headers.has('Range') && /mpegurl/i.test(upstream.headers.get('content-type') ?? '')) {
     // Rewriting needs a complete playlist, including extensionless endpoints.
     await upstream.body?.cancel(); headers.delete('Range');
-    upstream = await fetcher(target, { headers, signal: request.signal });
+    upstream = await fetcher(target, { headers, signal: request.signal }, trace);
+    noteResponse(trace, upstream);
   }
   if (!upstream.ok) {
     await upstream.body?.cancel();
-    throw new HttpError(upstream.status === 429 ? 503 : 502, '电台暂时无法播放，请稍后重试。');
+    throw new HttpError(upstream.status === 429 ? 503 : 502, '电台暂时无法播放，请稍后重试。', 'UPSTREAM_HTTP');
   }
   const type = upstream.headers.get('content-type') ?? 'application/octet-stream';
-  if (type.includes('text/html')) { await upstream.body?.cancel(); throw new HttpError(502, '电台返回了错误页面，请稍后重试。'); }
-  const output = new Headers({ 'Content-Type': type, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' });
+  if (/text\/html/i.test(type)) { await upstream.body?.cancel(); throw new HttpError(502, '电台返回了错误页面，请稍后重试。', 'HTML_RESPONSE'); }
+  const output = new Headers({ 'Content-Type': type, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff', 'X-Request-ID': trace.requestId });
   if (playlistPath || /mpegurl/i.test(type)) {
     const text = await upstream.text();
-    if (!text.trimStart().startsWith('#EXTM3U')) throw new HttpError(502, '电台播放列表无效。');
+    if (!text.trimStart().startsWith('#EXTM3U')) throw new HttpError(502, '电台播放列表无效。', 'INVALID_PLAYLIST');
     output.set('Content-Type', 'application/vnd.apple.mpegurl');
     return new Response(rewritePlaylist(token, target, text), { headers: output });
   }

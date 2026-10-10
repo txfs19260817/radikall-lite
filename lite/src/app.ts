@@ -2,7 +2,7 @@ import type { BootstrapResponse, StationSummary, NowPlayingResponse, ProgramEntr
 
 type Theme = 'system' | 'dark' | 'light';
 type Playback = { kind: 'idle' | 'loading' | 'playing' | 'paused' } | { kind: 'error'; message: string };
-type Session = { streamUrl: string; stationId: string; expiresAtEpochMillis: number };
+type Session = { streamUrl: string; stationId: string; expiresAtEpochMillis: number; playbackId?: string };
 type HlsInstance = {
   loadSource(url: string): void; attachMedia(audio: HTMLAudioElement): void; destroy(): void;
   on(event: string, callback: (event: string, data: { fatal?: boolean }) => void): void;
@@ -55,7 +55,7 @@ async function api<T>(url: string, options: RequestInit = {}): Promise<T> {
   }
   if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('服务暂时不可用，可能达到托管额度。请稍后重试。');
   const data = await response.json();
-  if (!response.ok) throw new Error(typeof data.message === 'string' ? cleanText(data.message).slice(0, 160) : `服务暂时不可用（${response.status}）。`);
+  if (!response.ok) throw new Error(withReference(typeof data.message === 'string' ? cleanText(data.message).slice(0, 160) : `服务暂时不可用（${response.status}）。`, data.requestId));
   return data as T;
 }
 
@@ -74,8 +74,11 @@ function setPhase(phase: Playback) {
   $('on-air').innerHTML = `<span></span>${playing ? 'ON AIR / LIVE' : phase.kind === 'loading' ? 'TUNING IN…' : 'READY TO TUNE IN'}`;
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = playing ? 'playing' : phase.kind === 'paused' ? 'paused' : 'none';
 }
-function reportError(error: unknown) {
-  const message = error instanceof Error ? error.message : '暂时无法播放，请重试。';
+function withReference(message: string, id?: unknown) {
+  return typeof id === 'string' && /^[\da-f]{8}-[\da-f-]{27}$/.test(id) ? `${message}（关联 ID：${id}）` : message;
+}
+function reportError(error: unknown, playbackId?: string) {
+  const message = withReference(error instanceof Error ? error.message : '暂时无法播放，请重试。', playbackId);
   setPhase({ kind: 'error', message }); toast(message);
 }
 function logo(station: StationSummary, className = 'station-logo') {
@@ -181,8 +184,9 @@ async function attach(session: Session, ticket: number) {
   const instance = hls = new Hls({ enableWorker: true, maxBufferLength: 30, backBufferLength: 15 });
   instance.on(Hls.Events.ERROR!, (_, data) => {
     if (hls !== instance || !data.fatal) return;
+    const playbackId = state.session?.playbackId;
     instance.destroy(); hls = undefined; state.session = null;
-    audio.pause(); reportError(new Error('播放连接中断，请点击播放重新连接。'));
+    audio.pause(); reportError(new Error('播放连接中断，请点击播放重新连接。'), playbackId);
   });
   instance.loadSource(session.streamUrl); instance.attachMedia(audio);
 }
@@ -213,7 +217,12 @@ async function start(force = false) {
     if (ticket !== generation || signal.aborted) return;
     if (error instanceof DOMException && error.name === 'NotAllowedError') {
       setPhase({ kind: 'paused' }); toast('电台已准备好，请再点一下播放。');
-    } else { state.session = null; resetAudio(); reportError(error); }
+    } else {
+      const playbackId = state.session?.playbackId;
+      state.session = null; resetAudio();
+      // Preserve a more specific media error if it arrived before play() rejected.
+      if (state.phase.kind !== 'error') reportError(error instanceof DOMException ? new Error('音频暂时无法播放，请点击播放重试。') : error, playbackId);
+    }
   }
 }
 function pause() {
@@ -231,7 +240,8 @@ audio.addEventListener('playing', () => { if (state.phase.kind !== 'paused' && s
 audio.addEventListener('pause', () => { if (state.phase.kind === 'playing') { setPhase({ kind: 'paused' }); clearTimeout(renewTimer); } });
 audio.addEventListener('error', () => {
   if (state.phase.kind === 'idle' || state.phase.kind === 'paused' || state.phase.kind === 'error') return;
-  state.session = null; reportError(new Error('音频暂时无法播放，请点击播放重试。'));
+  const playbackId = state.session?.playbackId;
+  state.session = null; reportError(new Error('音频暂时无法播放，请点击播放重试。'), playbackId);
 });
 audio.addEventListener('timeupdate', () => { if (sleepDeadline && Date.now() >= sleepDeadline) stopForSleep(); });
 if ('mediaSession' in navigator) {

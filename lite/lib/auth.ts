@@ -1,6 +1,7 @@
 import { fetchUpstream as fetch } from "./network.ts";
 import { fullKeyBase64, gpsCoordinates } from "./data.ts";
 import type { AuthSession } from "./types.ts";
+import { atStage, UpstreamFault, type Diagnostic } from './diagnostics.ts';
 
 const APP_NAME = "aSmartPhone8";
 const APP_VERSION = "8.2.4";
@@ -28,53 +29,59 @@ const DEVICE_PROFILES = [
 
 const decoder = new TextDecoder();
 
-export async function authenticate(areaId: string): Promise<AuthSession> {
+export async function authenticate(areaId: string, context?: Diagnostic): Promise<AuthSession> {
   const device = pickDeviceProfile();
   const userAgent = `Dalvik/2.1.0 (Linux; U; Android ${device.androidVersion}; ${device.model}/${device.build})`;
   const userId = randomHex(32);
   const deviceHeader = `${device.sdk}.${device.model}`;
 
-  const auth1Response = await fetch("https://radiko.jp/v2/api/auth1", {
-    headers: {
-      "X-Radiko-App": APP_NAME,
-      "X-Radiko-App-Version": APP_VERSION,
-      "X-Radiko-Device": deviceHeader,
-      "X-Radiko-User": userId,
-      "User-Agent": userAgent,
-    },
+  const { token, keyOffset, keyLength } = await atStage(context, 'auth1', async trace => {
+    const auth1Response = await fetch("https://radiko.jp/v2/api/auth1", {
+      headers: {
+        "X-Radiko-App": APP_NAME,
+        "X-Radiko-App-Version": APP_VERSION,
+        "X-Radiko-Device": deviceHeader,
+        "X-Radiko-User": userId,
+        "User-Agent": userAgent,
+      },
+    }, trace);
+    await auth1Response.body?.cancel();
+
+    if (!auth1Response.ok) {
+      throw new UpstreamFault('UPSTREAM_HTTP');
+    }
+
+    const token = auth1Response.headers.get("x-radiko-authtoken");
+    const keyOffset = Number.parseInt(auth1Response.headers.get("x-radiko-keyoffset") ?? "", 10);
+    const keyLength = Number.parseInt(auth1Response.headers.get("x-radiko-keylength") ?? "", 10);
+    if (token == null || Number.isNaN(keyOffset) || Number.isNaN(keyLength)) {
+      throw new UpstreamFault('AUTH_HEADERS');
+    }
+    return { token, keyOffset, keyLength };
   });
 
-  if (!auth1Response.ok) {
-    throw new Error(`Auth1 failed with HTTP ${auth1Response.status}`);
-  }
+  const resolvedAreaId = await atStage(context, 'auth2', async trace => {
+    const auth2Response = await fetch("https://radiko.jp/v2/api/auth2", {
+      headers: {
+        "X-Radiko-App": APP_NAME,
+        "X-Radiko-App-Version": APP_VERSION,
+        "X-Radiko-Device": deviceHeader,
+        "X-Radiko-User": userId,
+        "X-Radiko-AuthToken": token,
+        "X-Radiko-Partialkey": generatePartialKey(keyOffset, keyLength),
+        "X-Radiko-Location": generateGps(areaId),
+        "X-Radiko-Connection": "wifi",
+        "User-Agent": userAgent,
+      },
+    }, trace);
 
-  const token = auth1Response.headers.get("x-radiko-authtoken");
-  const keyOffset = Number.parseInt(auth1Response.headers.get("x-radiko-keyoffset") ?? "", 10);
-  const keyLength = Number.parseInt(auth1Response.headers.get("x-radiko-keylength") ?? "", 10);
-  if (token == null || Number.isNaN(keyOffset) || Number.isNaN(keyLength)) {
-    throw new Error("Auth1 succeeded but required headers were missing.");
-  }
+    const auth2Text = await auth2Response.text();
+    if (!auth2Response.ok) {
+      throw new UpstreamFault('UPSTREAM_HTTP');
+    }
 
-  const auth2Response = await fetch("https://radiko.jp/v2/api/auth2", {
-    headers: {
-      "X-Radiko-App": APP_NAME,
-      "X-Radiko-App-Version": APP_VERSION,
-      "X-Radiko-Device": deviceHeader,
-      "X-Radiko-User": userId,
-      "X-Radiko-AuthToken": token,
-      "X-Radiko-Partialkey": generatePartialKey(keyOffset, keyLength),
-      "X-Radiko-Location": generateGps(areaId),
-      "X-Radiko-Connection": "wifi",
-      "User-Agent": userAgent,
-    },
+    return auth2Text.match(/JP\d{1,2}/u)?.[0] ?? areaId;
   });
-
-  const auth2Text = await auth2Response.text();
-  if (!auth2Response.ok) {
-    throw new Error(`Auth2 failed with HTTP ${auth2Response.status}`);
-  }
-
-  const resolvedAreaId = auth2Text.match(/JP\d{1,2}/u)?.[0] ?? areaId;
   return {
     token,
     areaId: resolvedAreaId,

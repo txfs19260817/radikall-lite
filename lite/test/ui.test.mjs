@@ -9,17 +9,18 @@ const catalog=JSON.parse(await readFile(root+'lib/catalog.json','utf8')).bootstr
 const win=new Window({url:'https://radio.test',settings:{disableJavaScriptFileLoading:true,disableCSSFileLoading:true}});
 const doc=win.document;doc.write(html);
 win.Option=function(text,value){const option=doc.createElement('option');option.textContent=text;option.value=value;return option;};
-let sessions=0;
+let sessions=0, sessionFailure=false, mediaFailure=false;
+const reference='11111111-2222-4333-8444-555555555555';
 win.AbortSignal.any=AbortSignal.any;win.AbortSignal.timeout=AbortSignal.timeout;
 win.AbortController=AbortController;
 win.fetch=async (url,options)=>{
  if(url==='/api/bootstrap')return new Response(JSON.stringify(catalog),{headers:{'content-type':'application/json'}});
  if(url.includes('now-playing'))return new Response(JSON.stringify({currentProgram:{title:'<![CDATA[Music &amp; You]]>',performer:'DJ Test',startAt:'20261010100000',endAt:'20261010110000'}}),{headers:{'content-type':'application/json'}});
- if(url.includes('live-session')){sessions++;let stationId=JSON.parse(options.body).stationId;return new Response(JSON.stringify({stationId,streamUrl:'/sample.m3u8',expiresAtEpochMillis:Date.now()+55*60000}),{headers:{'content-type':'application/json'}})}
+ if(url.includes('live-session')){sessions++;if(sessionFailure)return Response.json({message:'暂时无法连接电台服务，请稍后重试。',requestId:reference},{status:502});let stationId=JSON.parse(options.body).stationId;return new Response(JSON.stringify({stationId,playbackId:reference,streamUrl:'/sample.m3u8',expiresAtEpochMillis:Date.now()+55*60000}),{headers:{'content-type':'application/json'}})}
  throw new Error(url);
 };
 win.HTMLMediaElement.prototype.canPlayType=()=> 'probably';
-win.HTMLMediaElement.prototype.play=async function(){this.dispatchEvent(new win.Event('playing'));};
+win.HTMLMediaElement.prototype.play=async function(){if(mediaFailure){this.dispatchEvent(new win.Event('error'));throw new win.DOMException('raw-media-error-must-not-leak','NotSupportedError');}this.dispatchEvent(new win.Event('playing'));};
 win.HTMLMediaElement.prototype.pause=function(){this.dispatchEvent(new win.Event('pause'));};
 win.HTMLMediaElement.prototype.load=function(){};
 try{
@@ -36,8 +37,14 @@ try{
  q('hero-play').click();await new Promise(r=>setTimeout(r,30));
  assert.equal(q('play-status').textContent,'正在直播');assert.equal(sessions,1);
  q('hero-play').click();assert.equal(q('play-status').textContent,'已暂停');
+ sessionFailure=true;q('hero-play').click();await new Promise(r=>setTimeout(r,30));
+ assert.ok(q('play-status').textContent.includes(reference));
+ sessionFailure=false;mediaFailure=true;q('hero-play').click();await new Promise(r=>setTimeout(r,30));
+ assert.ok(q('play-status').textContent.includes(reference));assert.ok(!q('play-status').textContent.includes('raw-media-error'));
+ mediaFailure=false;q('hero-play').click();await new Promise(r=>setTimeout(r,30));
+ assert.equal(q('play-status').textContent,'正在直播');q('hero-play').click();
  q('player-sleep').click();doc.querySelector('[data-minutes="15"]').click();
  assert.match(q('sleep-label').textContent,/15/);
  assert.equal(q('program-title').textContent,'Music & You');
- console.log('DOM checks passed: bootstrap, theme, search, favorites across regions, play/pause, sleep timer, CDATA metadata.');
+ console.log('DOM checks passed: bootstrap, theme, search, favorites, play/pause, error references and retry, sleep timer, CDATA metadata.');
 }finally{await win.happyDOM.close();}
