@@ -111,6 +111,39 @@ function logo(station: StationSummary, className = 'station-logo') {
   box.append(image); return box;
 }
 
+function renderProgramArtwork(program?: ProgramEntry | null) {
+  const cover = $('program-cover'), ambience = $('program-ambience'), panel = $('program-panel');
+  const stationSource = state.selected?.logoUrl ?? '';
+  let source = stationSource;
+  try {
+    const url = new URL(program?.imageUrl ?? '');
+    if (url.protocol === 'https:' && !url.username && !url.password) source = url.href;
+  } catch { /* Missing program art falls back to the station logo. */ }
+  if (cover.dataset.source === source) return;
+  cover.dataset.source = source;
+  panel.classList.remove('has-program-art'); cover.classList.remove('art-loaded');
+  replaceContent(cover); replaceContent(ambience); cover.innerHTML = icon('radio');
+  const load = (url: string) => {
+    if (!url) return;
+    const image = new Image(); image.alt = ''; image.width = 160; image.height = 160;
+    cover.dataset.kind = url === stationSource ? 'station' : 'program';
+    image.addEventListener('load', () => {
+      if (!cover.contains(image)) return;
+      // Reuse the loaded resource; the blurred layer needs no larger image.
+      const backdrop = image.cloneNode() as HTMLImageElement;
+      backdrop.loading = 'eager'; replaceContent(ambience, backdrop);
+      panel.classList.add('has-program-art'); cover.classList.add('art-loaded');
+    }, { once: true });
+    image.addEventListener('error', () => {
+      if (!cover.contains(image)) return;
+      pendingImages.delete(image); imageObserver?.unobserve(image); image.remove();
+      if (url !== stationSource) load(stationSource);
+    }, { once: true });
+    cover.append(image); deferImage(image, url);
+  };
+  load(source);
+}
+
 function renderStations() {
   if (!state.data) return;
   const query = state.query.normalize('NFKC').toLocaleLowerCase();
@@ -157,6 +190,8 @@ function selectStation(station: StationSummary) {
   replaceContent($('mini-logo'), logo(station, 'mini-logo'));
   $('player-bar').hidden = false; $<HTMLButtonElement>('hero-play').disabled = false;
   $('program-title').textContent = '正在获取节目信息…'; $('program-time').textContent = 'LIVE RADIO / ラジオ';
+  $('program-detail').innerHTML = '<p class="muted">正在获取节目信息…</p>';
+  renderProgramArtwork();
   renderStations(); updateFavorite(); updateMediaSession(); void updateProgram();
 }
 function updateMediaSession(program?: ProgramEntry | null) {
@@ -177,6 +212,7 @@ async function updateProgram() {
     if (signal.aborted || state.selected?.id !== station.id) return;
     state.nowPlaying = data; renderSongHistory(); $('songs-status').hidden = true;
     const program = data.currentProgram;
+    renderProgramArtwork(program);
     $('program-title').textContent = program ? cleanText(program.title) : '直播中 · 暂无节目信息';
     $('program-detail').innerHTML = program ? `<p class="program-name">${escape(cleanText(program.title))}</p><p class="program-performer">${escape(cleanText(program.performer ?? ''))}</p><p class="muted">${formatProgramTime(program)}</p>` : '<p class="muted">当前没有节目信息，仍然可以收听直播。</p>';
     if (program) $('program-time').textContent = formatProgramTime(program);

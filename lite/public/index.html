@@ -43,9 +43,10 @@
           <div class="tuner-content"><div class="tuner-station"><span id="selected-area" class="eyebrow">选择一个电台</span><h2 id="selected-name">从这里，听见日本。</h2><p id="program-title">选一个熟悉的声音，或发现下一个喜欢的频率。</p></div><button id="hero-play" class="hero-play" disabled aria-label="播放"><svg><use href="#i-play"/></svg></button></div>
           <div class="tuner-foot"><span id="program-time">LIVE RADIO / ラジオ</span><div class="signal-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><a href="#songs" class="song-link">歌曲记录 ↓</a></div>
         </section>
-        <aside class="side-panel">
-          <div class="side-heading"><span class="eyebrow">ON THE AIR</span><svg><use href="#i-radio"/></svg></div>
-          <h2>此刻的节目</h2><div id="program-detail" class="program-detail"><p class="muted">选择电台后，这里会显示正在播出的节目。</p></div>
+        <aside id="program-panel" class="side-panel" aria-labelledby="program-heading">
+          <div id="program-ambience" class="program-ambience" aria-hidden="true"></div>
+          <div class="side-heading"><span class="eyebrow"><span class="program-live-dot" aria-hidden="true"></span>ON THE AIR</span><svg aria-hidden="true"><use href="#i-radio"/></svg></div>
+          <div class="program-summary"><div class="program-copy"><h2 id="program-heading">此刻的节目</h2><div id="program-detail" class="program-detail"><p class="muted">选择电台后，这里会显示正在播出的节目。</p></div></div><div id="program-cover" class="program-cover" aria-hidden="true"><svg><use href="#i-radio"/></svg></div></div>
           <div class="side-bottom"><span class="eyebrow">TAKE IT SLOW.</span><p>不必一直看屏幕。<br>让喜欢的声音留在身边。</p><button id="sleep-open" class="text-button"><svg><use href="#i-clock"/></svg><span id="sleep-label">设置睡眠定时</span><svg><use href="#i-arrow"/></svg></button></div>
         </aside>
       </div>
