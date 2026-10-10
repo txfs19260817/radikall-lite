@@ -1,4 +1,4 @@
-import type { BootstrapResponse, StationSummary, NowPlayingResponse, ProgramEntry } from '../lib/types.ts';
+import type { BootstrapResponse, StationSummary, NowPlayingResponse, ProgramEntry, OnAirSong } from '../lib/types.ts';
 
 type Theme = 'system' | 'dark' | 'light';
 type Playback = { kind: 'idle' | 'loading' | 'playing' | 'paused' } | { kind: 'error'; message: string };
@@ -28,6 +28,7 @@ const state = {
   data: null as BootstrapResponse | null, selected: null as StationSummary | null,
   phase: { kind: 'idle' } as Playback, session: null as Session | null,
   favorites: readFavorites(), favoritesOnly: false, area: storage.get('area') ?? 'JP13', query: '',
+  nowPlaying: null as NowPlayingResponse | null, songsForProgram: false, showAllSongs: false,
 };
 let generation = 0;
 let sessionAbort: AbortController | undefined;
@@ -127,6 +128,8 @@ function updateFavorite() {
 }
 function selectStation(station: StationSummary) {
   state.selected = station; storage.set('station', station.id);
+  state.nowPlaying = null; state.songsForProgram = false; state.showAllSongs = false;
+  $('songs-station').textContent = station.name; renderSongHistory();
   $('selected-name').textContent = station.name;
   $('selected-area').textContent = `${nameForArea(station.areaIds[0]!)} / JAPAN LIVE`;
   $('mini-name').textContent = station.name;
@@ -144,9 +147,14 @@ async function updateProgram() {
   const station = state.selected; if (!station) return;
   metadataAbort?.abort(); metadataAbort = new AbortController();
   const signal = metadataAbort.signal;
+  $('song-content').setAttribute('aria-busy', 'true');
+  $<HTMLButtonElement>('songs-refresh').disabled = true;
+  $('songs-status').hidden = false;
+  $('songs-status').textContent = state.nowPlaying ? '正在更新歌曲记录…' : '正在获取歌曲记录…';
   try {
     const data = await api<NowPlayingResponse>(`/api/stations/${encodeURIComponent(station.id)}/now-playing`, { signal });
-    if (state.selected?.id !== station.id) return;
+    if (signal.aborted || state.selected?.id !== station.id) return;
+    state.nowPlaying = data; renderSongHistory(); $('songs-status').hidden = true;
     const program = data.currentProgram;
     $('program-title').textContent = program ? cleanText(program.title) : '直播中 · 暂无节目信息';
     $('program-detail').innerHTML = program ? `<p class="program-name">${escape(cleanText(program.title))}</p><p class="program-performer">${escape(cleanText(program.performer ?? ''))}</p><p class="muted">${formatProgramTime(program)}</p>` : '<p class="muted">当前没有节目信息，仍然可以收听直播。</p>';
@@ -156,8 +164,67 @@ async function updateProgram() {
     if (signal.aborted || state.selected?.id !== station.id) return;
     $('program-title').textContent = '节目信息暂不可用 · 点击播放收听';
     $('program-detail').innerHTML = '<p class="muted">节目信息暂不可用，仍然可以尝试播放。</p>';
+    $('songs-status').textContent = state.nowPlaying ? '更新暂时失败，显示上次获取的记录。可点击刷新重试。' : '歌曲记录暂时无法获取，请点击刷新重试。';
+  } finally {
+    if (!signal.aborted && state.selected?.id === station.id) {
+      $('song-content').setAttribute('aria-busy', 'false');
+      $<HTMLButtonElement>('songs-refresh').disabled = false;
+    }
   }
 }
+
+function songContent(song: OnAirSong): HTMLElement {
+  const row = document.createElement('div'); row.className = 'song-row';
+  const artwork = document.createElement('span'); artwork.className = 'song-artwork'; artwork.textContent = '♪'; artwork.setAttribute('aria-hidden', 'true');
+  try {
+    const url = new URL(song.imageUrl ?? '');
+    if (url.protocol === 'https:' && !url.username && !url.password) {
+      const image = new Image(); image.alt = ''; image.loading = 'lazy'; image.decoding = 'async'; image.referrerPolicy = 'no-referrer';
+      image.src = url.href; image.addEventListener('error', () => image.remove(), { once: true }); artwork.append(image);
+    }
+  } catch { /* Missing covers keep the music-note placeholder. */ }
+  const copy = document.createElement('div'); copy.className = 'song-copy';
+  const title = document.createElement('strong'); title.className = 'song-title'; title.textContent = cleanText(song.title);
+  const artist = document.createElement('span'); artist.className = 'song-artist'; artist.textContent = cleanText(song.artist);
+  const time = document.createElement('time'); time.className = 'song-time';
+  const date = new Date(song.stampDate);
+  if (Number.isNaN(date.getTime())) time.textContent = '播出时间未知';
+  else {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Tokyo', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date).map(part => [part.type, part.value]));
+    time.dateTime = date.toISOString(); time.textContent = `${parts.month}/${parts.day} ${parts.hour}:${parts.minute} JST`;
+  }
+  copy.append(title, artist, time); row.append(artwork, copy); return row;
+}
+
+function renderSongHistory() {
+  const data = state.nowPlaying, latest = data?.currentSong ?? data?.recentSongs[0] ?? null;
+  const current = $('latest-song'); current.replaceChildren();
+  if (latest) current.append(songContent(latest));
+  else { const empty = document.createElement('p'); empty.className = 'muted'; empty.textContent = '电台暂未公布歌曲信息。'; current.append(empty); }
+  const source = (state.songsForProgram ? data?.currentProgramSongs : data?.recentSongs) ?? [];
+  // Keep repeated songs at different broadcast times; omit only the latest entry.
+  const history = source.filter(song => !latest || song.title !== latest.title || song.artist !== latest.artist || song.stampDate !== latest.stampDate);
+  $('songs-count').textContent = String(history.length);
+  const fragment = new DocumentFragment();
+  for (const song of state.showAllSongs ? history : history.slice(0, 4)) {
+    const item = document.createElement('li'); item.append(songContent(song)); fragment.append(item);
+  }
+  $('song-history').replaceChildren(fragment);
+  $('songs-empty').hidden = history.length > 0 || !data;
+  $('songs-empty').textContent = state.songsForProgram ? '暂无本节目更早的歌曲记录，可以切换到全台最近。' : '暂无更早的歌曲记录。';
+  const more = $('songs-more'); more.hidden = history.length <= 4;
+  more.textContent = state.showAllSongs ? '收起记录' : `展开更多（共 ${history.length} 首）`;
+  more.setAttribute('aria-expanded', String(state.showAllSongs));
+  for (const [id, active] of [['songs-station-scope', !state.songsForProgram], ['songs-program', state.songsForProgram]] as const) {
+    $(id).classList.toggle('active', active); $(id).setAttribute('aria-pressed', String(active));
+  }
+}
+
+$('songs-refresh').addEventListener('click', () => { void updateProgram(); });
+$('songs-more').addEventListener('click', () => { state.showAllSongs = !state.showAllSongs; renderSongHistory(); });
+for (const [id, programOnly] of [['songs-station-scope', false], ['songs-program', true]] as const) $(id).addEventListener('click', () => {
+  state.songsForProgram = programOnly; state.showAllSongs = false; renderSongHistory();
+});
 function formatProgramTime(program: ProgramEntry) {
   const fmt = (value: string) => /^\d{14}$/.test(value) ? `${value.slice(8, 10)}:${value.slice(10, 12)}` : '--:--';
   return `${fmt(program.startAt)} — ${fmt(program.endAt)} JST`;

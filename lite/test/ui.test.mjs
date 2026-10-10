@@ -10,12 +10,16 @@ const win=new Window({url:'https://radio.test',settings:{disableJavaScriptFileLo
 const doc=win.document;doc.write(html);
 win.Option=function(text,value){const option=doc.createElement('option');option.textContent=text;option.value=value;return option;};
 let sessions=0, sessionFailure=false, mediaFailure=false;
+let programFailure=false, emptySongs=false, deferPrograms=false;
+const pendingPrograms=[];
+const songs=Array.from({length:7},(_,i)=>({title:i===0?'<![CDATA[Latest &amp; Track]]>':`Song ${i}`,artist:i===1?'<img src=x onerror="alert(1)">Artist':'Artist',imageUrl:null,stampDate:`2026-10-11T06:${String(45-i*5).padStart(2,'0')}:00+09:00`}));
+const programData=stationId=>({stationId,currentProgram:{title:'<![CDATA[Music &amp; You]]>',performer:'DJ Test',startAt:'20261011060000',endAt:'20261011100000'},currentSong:emptySongs?null:songs[0],currentProgramSongs:emptySongs?[]:songs.slice(0,2),recentSongs:emptySongs?[]:songs});
 const reference='11111111-2222-4333-8444-555555555555';
 win.AbortSignal.any=AbortSignal.any;win.AbortSignal.timeout=AbortSignal.timeout;
 win.AbortController=AbortController;
 win.fetch=async (url,options)=>{
  if(url==='/api/bootstrap')return new Response(JSON.stringify(catalog),{headers:{'content-type':'application/json'}});
- if(url.includes('now-playing'))return new Response(JSON.stringify({currentProgram:{title:'<![CDATA[Music &amp; You]]>',performer:'DJ Test',startAt:'20261010100000',endAt:'20261010110000'}}),{headers:{'content-type':'application/json'}});
+ if(url.includes('now-playing')){const stationId=url.split('/')[3];if(deferPrograms)return new Promise(resolve=>pendingPrograms.push({stationId,resolve}));return Response.json(programData(stationId),{status:programFailure?502:200});}
  if(url.includes('live-session')){sessions++;if(sessionFailure)return Response.json({message:'暂时无法连接电台服务，请稍后重试。',requestId:reference},{status:502});let stationId=JSON.parse(options.body).stationId;return new Response(JSON.stringify({stationId,playbackId:reference,streamUrl:'/sample.m3u8',expiresAtEpochMillis:Date.now()+55*60000}),{headers:{'content-type':'application/json'}})}
  throw new Error(url);
 };
@@ -25,8 +29,19 @@ win.HTMLMediaElement.prototype.pause=function(){this.dispatchEvent(new win.Event
 win.HTMLMediaElement.prototype.load=function(){};
 try{
  await win.eval(`(async()=>{${js}\n})()`);
+ await new Promise(r=>setTimeout(r,30));
  const q=id=>doc.getElementById(id);
  assert.ok(doc.querySelectorAll('.station-card').length>0);
+ assert.equal(q('songs-station').textContent,'J-WAVE');
+ assert.equal(doc.querySelector('#latest-song .song-title').textContent,'Latest & Track');
+ assert.equal(doc.querySelectorAll('#song-history li').length,4);
+ assert.ok(!q('song-history').textContent.includes('Latest & Track'));
+ assert.match(q('latest-song').textContent,/10\/11.*06:45.*JST/);
+ assert.equal(q('song-history').querySelector('img[onerror]'),null);
+ q('songs-more').click();assert.equal(doc.querySelectorAll('#song-history li').length,6);
+ q('songs-program').click();assert.equal(doc.querySelectorAll('#song-history li').length,1);
+ assert.equal(q('songs-more').hidden,true);
+ q('songs-station-scope').click();assert.equal(doc.querySelectorAll('#song-history li').length,4);
  q('theme').click();assert.equal(doc.documentElement.dataset.theme,'dark');
  q('theme').click();assert.equal(doc.documentElement.dataset.theme,'light');
  q('search').value='J-WAVE';q('search').dispatchEvent(new win.Event('input'));
@@ -46,5 +61,22 @@ try{
  q('player-sleep').click();doc.querySelector('[data-minutes="15"]').click();
  assert.match(q('sleep-label').textContent,/15/);
  assert.equal(q('program-title').textContent,'Music & You');
- console.log('DOM checks passed: bootstrap, theme, search, favorites, play/pause, error references and retry, sleep timer, CDATA metadata.');
+ programFailure=true;q('songs-refresh').click();await new Promise(r=>setTimeout(r,30));
+ assert.match(q('songs-status').textContent,/上次/);assert.equal(doc.querySelectorAll('#song-history li').length,4);
+ programFailure=false;emptySongs=true;q('songs-refresh').click();await new Promise(r=>setTimeout(r,30));
+ assert.equal(doc.querySelectorAll('#song-history li').length,0);assert.match(q('songs-empty').textContent,/暂无/);
+ assert.equal(q('songs-more').hidden,true);emptySongs=false;q('songs-refresh').click();await new Promise(r=>setTimeout(r,30));
+ assert.equal(doc.querySelectorAll('#song-history li').length,4);
+ // A → B → A responses can arrive after abort. Never restore another station's
+ // songs, or an older request for the same station.
+ deferPrograms=true;q('tab-all').click();q('area').value='JP13';q('area').dispatchEvent(new win.Event('change'));
+ const choose=name=>{q('search').value=name;q('search').dispatchEvent(new win.Event('input'));doc.querySelector('.station-select').click();};
+ choose('TBS');assert.equal(q('song-history').children.length,0);choose('J-WAVE');choose('TBS');
+ assert.equal(pendingPrograms.length,3);
+ const fresh=programData('TBS');fresh.currentSong={...songs[0],title:'Fresh TBS'};
+ pendingPrograms[2].resolve(Response.json(fresh));await new Promise(r=>setTimeout(r,30));
+ pendingPrograms[0].resolve(Response.json(programData('TBS')));pendingPrograms[1].resolve(Response.json(programData('FMJ')));await new Promise(r=>setTimeout(r,30));
+ assert.equal(doc.querySelector('#latest-song .song-title').textContent,'Fresh TBS');
+ assert.ok(q('songs-station').textContent.includes('TBS'));
+ console.log('DOM checks passed: playback, theme, favorites, song history scopes/expansion, JST, safe text, empty/error/retry and station-switch races.');
 }finally{await win.happyDOM.close();}

@@ -1,5 +1,28 @@
 # Verification — 2026-10-10
 
+## Station song history
+
+The existing now-playing API already supplied the latest song, current-program
+songs and up to 50 recent station songs. The Lite UI now renders those records
+below the tuner on desktop and mobile, with covers, artist names and explicit
+JST timestamps. Station/program scopes, four-row expansion and manual refresh
+use the existing endpoint and playback-time 60-second refresh schedule.
+Album covers load directly from their HTTPS image providers.
+
+- Node 24.21.0: type check, frontend build, all 13 backend tests and DOM checks
+  passed. DOM checks cover scope/expansion, JST conversion, untrusted text,
+  empty records, failed-refresh retention, retry and A → B → A request races.
+- Real FMJ records loaded through the local Node adapter and the production
+  metadata endpoint. Chrome 154.0.8037.98 in an isolated headless browser passed
+  history interaction checks at widths 1440, 1024, 768, 390 and 320, with no
+  horizontal overflow or JavaScript page errors. Screenshots were captured in
+  dark mode at all widths and light mode at 1440 and 390; the desktop dark and
+  mobile light screenshots were visually reviewed.
+- At width 390, real audio started and continued advancing during a manual
+  song-history refresh. No physical mobile browser was available for this change.
+- This feature was verified locally; production deployment is left to the user's
+  Git push through the existing Vercel integration.
+
 ## Playback / native select fix (local handoff)
 
 Production inspected: `dpl_Ch24SdJM4noBR4Z71fEekimSetQq`, Git `main` at

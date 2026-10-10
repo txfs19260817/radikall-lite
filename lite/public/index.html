@@ -41,7 +41,7 @@
           <div class="tuner-top"><span class="eyebrow">YOUR LITTLE ESCAPE</span><span class="on-air" id="on-air"><span></span>READY TO TUNE IN</span></div>
           <div class="dial-art" aria-hidden="true"><div class="dial-grid"></div><div class="dial-orbit orbit-1"></div><div class="dial-orbit orbit-2"></div><div class="dial-orbit orbit-3"></div><div class="dial-core"><svg><use href="#i-radio"/></svg></div><span class="dial-coordinate">35°40′ N<br>139°45′ E</span><span class="dial-label">THE SOUND<br>OF SOMEWHERE.</span></div>
           <div class="tuner-content"><div class="tuner-station"><span id="selected-area" class="eyebrow">选择一个电台</span><h2 id="selected-name">从这里，听见日本。</h2><p id="program-title">选一个熟悉的声音，或发现下一个喜欢的频率。</p></div><button id="hero-play" class="hero-play" disabled aria-label="播放"><svg><use href="#i-play"/></svg></button></div>
-          <div class="tuner-foot"><span id="program-time">LIVE RADIO / ラジオ</span><div class="signal-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span>RADIKALL LITE</span></div>
+          <div class="tuner-foot"><span id="program-time">LIVE RADIO / ラジオ</span><div class="signal-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><a href="#songs" class="song-link">歌曲记录 ↓</a></div>
         </section>
         <aside class="side-panel">
           <div class="side-heading"><span class="eyebrow">ON THE AIR</span><svg><use href="#i-radio"/></svg></div>
@@ -49,6 +49,17 @@
           <div class="side-bottom"><span class="eyebrow">TAKE IT SLOW.</span><p>不必一直看屏幕。<br>让喜欢的声音留在身边。</p><button id="sleep-open" class="text-button"><svg><use href="#i-clock"/></svg><span id="sleep-label">设置睡眠定时</span><svg><use href="#i-arrow"/></svg></button></div>
         </aside>
       </div>
+      <section id="songs" class="songs-section" aria-labelledby="songs-heading">
+        <div class="section-heading songs-heading"><div><p class="eyebrow">RECENTLY ON AIR</p><h2 id="songs-heading">歌曲记录</h2><p id="songs-station" class="songs-station">选择电台后查看</p></div><button id="songs-refresh" class="songs-refresh" type="button" disabled>刷新记录</button></div>
+        <div class="song-panel">
+          <p id="songs-status" class="songs-status muted" role="status">选择电台后，这里会显示最近播过的音乐。</p>
+          <div id="song-content" class="song-layout" aria-busy="false">
+            <div class="song-current"><h3>最新播出</h3><div id="latest-song"><p class="muted">等待歌曲记录</p></div></div>
+            <div class="song-past"><div class="song-history-heading"><h3>最近播过 <span id="songs-count" class="count">0</span></h3><div class="tabs" role="group" aria-label="歌曲记录范围"><button id="songs-station-scope" class="active" aria-pressed="true">全台最近</button><button id="songs-program" aria-pressed="false">本节目</button></div></div><ol id="song-history" class="song-history"></ol><p id="songs-empty" class="muted" hidden></p><button id="songs-more" class="songs-more" type="button" aria-expanded="false" aria-controls="song-history" hidden>展开更多</button></div>
+          </div>
+          <p class="song-note">电台公布的播出记录 · 日本时间（JST）</p>
+        </div>
+      </section>
       <section id="stations" class="stations-section" aria-labelledby="stations-heading">
         <div class="section-heading"><div><p class="eyebrow">FIND YOUR FREQUENCY</p><h2 id="stations-heading">发现电台 <span id="station-count" class="count">…</span></h2></div><div class="tabs" role="group" aria-label="电台分类"><button id="tab-all" class="active" aria-pressed="true">全部</button><button id="tab-favorites" aria-pressed="false"><svg><use href="#i-heart"/></svg>收藏 <span id="favorite-count">0</span></button></div></div>
         <div class="filters"><label class="search"><svg><use href="#i-search"/></svg><input id="search" type="search" placeholder="搜索电台名称，例如 J-WAVE" aria-label="搜索电台" autocomplete="off"></label><label class="area-filter"><span>地区</span><select id="area" aria-label="选择地区"><option value="JP13">东京</option></select></label></div>
