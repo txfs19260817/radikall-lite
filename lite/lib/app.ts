@@ -128,8 +128,18 @@ function requireSecret(env: Settings): string {
 
 async function proxy(request: Request, session: PlaybackTokenPayload, token: string, target: string, fetcher: Dependencies['fetchUpstream']) {
   const headers = new Headers({ 'X-Radiko-AuthToken': session.authToken, 'X-Radiko-AreaId': session.resolvedAreaId, 'User-Agent': session.userAgent });
-  if (request.headers.has('range')) headers.set('Range', request.headers.get('range')!);
-  const upstream = await fetcher(target, { headers, signal: request.signal });
+  const playlistPath = new URL(target).pathname.endsWith('.m3u8');
+  const range = request.headers.get('range');
+  // Native HLS probes with bytes=0-. Radiko's extensionless /medialist
+  // responds to that with literal "200 OK" instead of a playlist.
+  // A full-file range needs no forwarding; keep real segment byte ranges.
+  if (range && range !== 'bytes=0-' && !playlistPath) headers.set('Range', range);
+  let upstream = await fetcher(target, { headers, signal: request.signal });
+  if (headers.has('Range') && /mpegurl/i.test(upstream.headers.get('content-type') ?? '')) {
+    // Rewriting needs a complete playlist, including extensionless endpoints.
+    await upstream.body?.cancel(); headers.delete('Range');
+    upstream = await fetcher(target, { headers, signal: request.signal });
+  }
   if (!upstream.ok) {
     await upstream.body?.cancel();
     throw new HttpError(upstream.status === 429 ? 503 : 502, '电台暂时无法播放，请稍后重试。');
@@ -137,13 +147,13 @@ async function proxy(request: Request, session: PlaybackTokenPayload, token: str
   const type = upstream.headers.get('content-type') ?? 'application/octet-stream';
   if (type.includes('text/html')) { await upstream.body?.cancel(); throw new HttpError(502, '电台返回了错误页面，请稍后重试。'); }
   const output = new Headers({ 'Content-Type': type, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' });
-  for (const key of ['content-range', 'accept-ranges']) if (upstream.headers.has(key)) output.set(key, upstream.headers.get(key)!);
-  if (new URL(target).pathname.endsWith('.m3u8') || /mpegurl/i.test(type)) {
+  if (playlistPath || /mpegurl/i.test(type)) {
     const text = await upstream.text();
     if (!text.trimStart().startsWith('#EXTM3U')) throw new HttpError(502, '电台播放列表无效。');
     output.set('Content-Type', 'application/vnd.apple.mpegurl');
     return new Response(rewritePlaylist(token, target, text), { headers: output });
   }
+  for (const key of ['content-range', 'accept-ranges']) if (upstream.headers.has(key)) output.set(key, upstream.headers.get(key)!);
   return new Response(upstream.body, { status: upstream.status, headers: output });
 }
 

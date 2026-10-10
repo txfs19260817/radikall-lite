@@ -77,6 +77,37 @@ test('passes Range, streams binary audio and keeps raw upstream errors out of JS
   for (mode of ['html', 'error']) { const result = await handle(new Request(url), env); assert.equal(result.status, 502); assert.ok(!(await result.text()).match(/private|credential|<html>/)); }
 });
 
+test('native HLS open-ended Range does not turn an extensionless media playlist into 502', async () => {
+  const handle = createHandler({ ...stub, fetchUpstream: async (_input, init) => new Response(
+    new Headers(init?.headers).has('Range') ? '200 OK' : '#EXTM3U\n#EXTINF:5,\nsegment.aac\n',
+    { headers: { 'Content-Type': 'application/x-mpegURL' } },
+  ) });
+  const token = await encryptPlaybackToken(env.RADIKALL_SESSION_SECRET, payload);
+  const url = `https://radio.test/api/playback/live/${token}/proxy?target=${encodeURIComponent('https://example.smartstream.ne.jp/medialist')}`;
+  const response = await handle(new Request(url, { headers: { Range: 'bytes=0-' } }), env);
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /^#EXTM3U\n#EXTINF:5,\n\/api\/playback\/live\//);
+});
+
+test('extensionless playlists requested with a bounded Range are refetched whole before rewriting', async () => {
+  const ranges: (string | null)[] = [];
+  const handle = createHandler({ ...stub, fetchUpstream: async (_input, init) => {
+    const range = new Headers(init?.headers).get('Range'); ranges.push(range);
+    return new Response(range ? 'EXTM3U' : '#EXTM3U\nsegment.aac\n', {
+      status: range ? 206 : 200, headers: { 'Content-Type': 'application/x-mpegURL',
+        ...(range ? { 'Content-Range': 'bytes 1-6/100', 'Accept-Ranges': 'bytes' } : {}) },
+    });
+  } });
+  const token = await encryptPlaybackToken(env.RADIKALL_SESSION_SECRET, payload);
+  const url = `https://radio.test/api/playback/live/${token}/proxy?target=${encodeURIComponent('https://example.smartstream.ne.jp/medialist')}`;
+  const response = await handle(new Request(url, { headers: { Range: 'bytes=1-6' } }), env);
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /^#EXTM3U/);
+  assert.deepEqual(ranges, ['bytes=1-6', null]);
+  assert.equal(response.headers.get('Content-Range'), null);
+  assert.equal(response.headers.get('Accept-Ranges'), null);
+});
+
 test('redirect validation prevents forwarding authentication to another host', async context => {
   let calls = 0;
   context.mock.method(globalThis, 'fetch', async () => { calls++; return new Response(null, { status: 302, headers: { Location: 'https://evil.test/steal' } }); });
