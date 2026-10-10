@@ -82,11 +82,32 @@ function reportError(error: unknown, playbackId?: string) {
   const message = withReference(error instanceof Error ? error.message : '暂时无法播放，请重试。', playbackId);
   setPhase({ kind: 'error', message }); toast(message);
 }
+// Native lazy loading can fetch images several screens ahead. Keep requests
+// close to the viewport instead, especially when browsing all 109 stations.
+const pendingImages = new WeakMap<HTMLImageElement, string>();
+const imageObserver = typeof IntersectionObserver === 'function' ? new IntersectionObserver(entries => {
+  for (const entry of entries) {
+    if (!entry.isIntersecting) continue;
+    const image = entry.target as HTMLImageElement, source = pendingImages.get(image);
+    if (source && image.isConnected) image.src = source;
+    pendingImages.delete(image); imageObserver?.unobserve(image);
+  }
+}, { rootMargin: '160px' }) : undefined;
+function deferImage(image: HTMLImageElement, source: string) {
+  image.loading = 'lazy'; image.decoding = 'async'; image.referrerPolicy = 'no-referrer';
+  if (imageObserver) { pendingImages.set(image, source); imageObserver.observe(image); }
+  else image.src = source;
+}
+function replaceContent(container: HTMLElement, ...nodes: Node[]) {
+  // Do not keep observing detached images after a search, refresh or station switch.
+  for (const image of container.querySelectorAll('img')) { pendingImages.delete(image); imageObserver?.unobserve(image); }
+  container.replaceChildren(...nodes);
+}
 function logo(station: StationSummary, className = 'station-logo') {
   const box = document.createElement('span'); box.className = className;
-  const image = new Image(); image.alt = ''; image.loading = 'lazy'; image.decoding = 'async';
-  image.referrerPolicy = 'no-referrer'; image.src = station.logoUrl;
+  const image = new Image(); image.alt = ''; image.width = 224; image.height = 100;
   image.addEventListener('error', () => { box.textContent = station.id.slice(0, 5); }, { once: true });
+  deferImage(image, station.logoUrl);
   box.append(image); return box;
 }
 
@@ -114,7 +135,7 @@ function renderStations() {
     const empty = document.createElement('p'); empty.className = 'empty-state';
     empty.textContent = state.favoritesOnly ? '这里还没有收藏。点电台旁的爱心，把喜欢的声音留住。' : '没有匹配的电台。试试其他关键词或选择全部地区。'; fragment.append(empty);
   }
-  $('station-grid').replaceChildren(fragment); $('station-grid').setAttribute('aria-busy', 'false');
+  replaceContent($('station-grid'), fragment); $('station-grid').setAttribute('aria-busy', 'false');
 }
 function toggleFavorite(id: string) {
   if (state.favorites.has(id)) state.favorites.delete(id); else state.favorites.add(id);
@@ -133,7 +154,7 @@ function selectStation(station: StationSummary) {
   $('selected-name').textContent = station.name;
   $('selected-area').textContent = `${nameForArea(station.areaIds[0]!)} / JAPAN LIVE`;
   $('mini-name').textContent = station.name;
-  $('mini-logo').replaceChildren(logo(station, 'mini-logo'));
+  replaceContent($('mini-logo'), logo(station, 'mini-logo'));
   $('player-bar').hidden = false; $<HTMLButtonElement>('hero-play').disabled = false;
   $('program-title').textContent = '正在获取节目信息…'; $('program-time').textContent = 'LIVE RADIO / ラジオ';
   renderStations(); updateFavorite(); updateMediaSession(); void updateProgram();
@@ -179,8 +200,9 @@ function songContent(song: OnAirSong): HTMLElement {
   try {
     const url = new URL(song.imageUrl ?? '');
     if (url.protocol === 'https:' && !url.username && !url.password) {
-      const image = new Image(); image.alt = ''; image.loading = 'lazy'; image.decoding = 'async'; image.referrerPolicy = 'no-referrer';
-      image.src = url.href; image.addEventListener('error', () => image.remove(), { once: true }); artwork.append(image);
+      const image = new Image(); image.alt = ''; image.width = 160; image.height = 160;
+      image.addEventListener('error', () => image.remove(), { once: true });
+      deferImage(image, url.href); artwork.append(image);
     }
   } catch { /* Missing covers keep the music-note placeholder. */ }
   const copy = document.createElement('div'); copy.className = 'song-copy';
@@ -198,7 +220,7 @@ function songContent(song: OnAirSong): HTMLElement {
 
 function renderSongHistory() {
   const data = state.nowPlaying, latest = data?.currentSong ?? data?.recentSongs[0] ?? null;
-  const current = $('latest-song'); current.replaceChildren();
+  const current = $('latest-song'); replaceContent(current);
   if (latest) current.append(songContent(latest));
   else { const empty = document.createElement('p'); empty.className = 'muted'; empty.textContent = '电台暂未公布歌曲信息。'; current.append(empty); }
   const source = (state.songsForProgram ? data?.currentProgramSongs : data?.recentSongs) ?? [];
@@ -209,7 +231,7 @@ function renderSongHistory() {
   for (const song of state.showAllSongs ? history : history.slice(0, 4)) {
     const item = document.createElement('li'); item.append(songContent(song)); fragment.append(item);
   }
-  $('song-history').replaceChildren(fragment);
+  replaceContent($('song-history'), fragment);
   $('songs-empty').hidden = history.length > 0 || !data;
   $('songs-empty').textContent = state.songsForProgram ? '暂无本节目更早的歌曲记录，可以切换到全台最近。' : '暂无更早的歌曲记录。';
   const more = $('songs-more'); more.hidden = history.length <= 4;

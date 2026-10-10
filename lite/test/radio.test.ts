@@ -73,6 +73,7 @@ test('passes Range, streams binary audio and keeps raw upstream errors out of JS
   const url = `https://radio.test/api/playback/live/${token}/proxy?target=${encodeURIComponent('https://example.smartstream.ne.jp/segment.aac')}`;
   const response = await handle(new Request(url, { headers: { Range: 'bytes=0-2' } }), env);
   assert.equal(response.status, 206); assert.equal(response.headers.get('Content-Range'), 'bytes 0-2/99');
+  assert.equal(response.headers.get('Cache-Control'), 'no-store');
   assert.deepEqual(new Uint8Array(await response.arrayBuffer()), new Uint8Array([1, 2, 3]));
   for (mode of ['html', 'error']) { const result = await handle(new Request(url), env); assert.equal(result.status, 502); assert.ok(!(await result.text()).match(/private|credential|<html>/)); }
 });

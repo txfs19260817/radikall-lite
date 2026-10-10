@@ -104,7 +104,9 @@ async function fetchOnAirSongs(stationId: string, size: number): Promise<OnAirSo
         return {
           title,
           artist,
-          imageUrl: item.music?.image?.large ?? item.music?.image?.medium ?? item.music?.image?.small ?? null,
+          // The UI uses 48–84px covers. Prefer the provider's thumbnail (usually
+          // 160px) instead of downloading a 500px original for every song.
+          imageUrl: songArtwork(item.music?.image),
           stampDate,
         } satisfies OnAirSong;
       })
@@ -113,6 +115,18 @@ async function fetchOnAirSongs(stationId: string, size: number): Promise<OnAirSo
   } catch {
     return [];
   }
+}
+
+function songArtwork(image?: { large?: string; medium?: string; small?: string }): string | null {
+  const source = image?.medium || image?.small || image?.large;
+  if (!source) return null;
+  try {
+    const url = new URL(source);
+    if (url.protocol !== 'https:' || url.username || url.password) return null;
+    // The upstream's generic cover adds a request without identifying the song.
+    if (url.hostname === 'ac-static.cf.radiko.jp' && /^\/jacket_placeholder(?:_large)?\.(?:png|jpeg)$/.test(url.pathname)) return null;
+    return url.href;
+  } catch { return null; }
 }
 
 function extractTag(payload: string, tag: string): string | null {

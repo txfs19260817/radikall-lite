@@ -1,5 +1,46 @@
 # Verification — 2026-10-10
 
+## Asset loading and mobile storage
+
+The production audit found 19 image requests before scrolling, including 500px
+album art displayed at 48–84px and station logos several screens below the fold.
+The local PNG icons were already small; external images dominated downloads.
+
+- Prefer the upstream's medium cover (normally 160px), with small/large fallbacks.
+  Replace its generic placeholder downloads with the existing local music note.
+- Assign image URLs within 160px of the viewport. Re-rendering unregisters old
+  images, including queued callbacks, so removed items cannot start downloads.
+  Browsers without IntersectionObserver retain native lazy loading.
+- Optimize the two PNG icons with `oxipng 10.1.1 -o 4 --strip safe`:
+  192px: 1,161 → 362 bytes; 512px: 3,461 → 813 bytes. Canvas RGBA comparisons
+  confirmed every decoded pixel is identical, including transparency.
+
+Controlled comparison: isolated Chrome 154, fresh contexts, identical captured
+FMJ song data, local Brotli-compressed HTML/CSS/JS/JSON, real external images.
+Measurements include completed requests after metadata and four seconds idle,
+before scrolling; they measure transfer bytes, not a production speed guarantee.
+
+| Viewport | Before | After | Requests / image requests |
+| --- | ---: | ---: | --- |
+| 390×844, DPR 3 | 194,948 bytes | 39,194 bytes | 25 / 19 → 9 / 3 |
+| 1440×844, DPR 1 | 195,798 bytes | 39,767 bytes | 25 / 19 → 9 / 3 |
+
+Selecting all 109 stations without scrolling caused no extra image requests
+after the change. Scrolling to the last station loaded its logo successfully;
+expanding all 49 older songs, observer fallback, refresh during live playback,
+and layouts at widths 320–1440 passed. Mobile dark screenshots were reviewed.
+No physical mobile device was available.
+
+Node 24 type check/build, 14 backend tests and DOM checks passed. A fresh
+`@vercel/node` 23.0.1 / TypeScript 5.9.3 build loaded under Node 24; compiled
+health and FMJ metadata returned 200 and the latter selected thumbnail covers.
+
+No cache lifetimes were extended. Audio and song metadata remain `no-store`;
+only small preferences/favorites are written to localStorage. No service worker,
+Cache Storage, IndexedDB or offline audio storage is added. External thumbnail
+HTTP caches remain browser-managed; an empty Cache Storage does **not** measure
+or imply an empty HTTP cache. The HLS fallback remains loaded only on demand.
+
 ## Station song history
 
 The existing now-playing API already supplied the latest song, current-program

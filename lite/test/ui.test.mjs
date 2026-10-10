@@ -8,11 +8,17 @@ const js=await readFile(root+'public/app.js','utf8');
 const catalog=JSON.parse(await readFile(root+'lib/catalog.json','utf8')).bootstrap;
 const win=new Window({url:'https://radio.test',settings:{disableJavaScriptFileLoading:true,disableCSSFileLoading:true}});
 const doc=win.document;doc.write(html);
+const observedImages=new Set();let onImages;
+win.IntersectionObserver=class {
+ constructor(callback){onImages=callback;}
+ observe(image){observedImages.add(image);}
+ unobserve(image){observedImages.delete(image);}
+};
 win.Option=function(text,value){const option=doc.createElement('option');option.textContent=text;option.value=value;return option;};
 let sessions=0, sessionFailure=false, mediaFailure=false;
 let programFailure=false, emptySongs=false, deferPrograms=false;
 const pendingPrograms=[];
-const songs=Array.from({length:7},(_,i)=>({title:i===0?'<![CDATA[Latest &amp; Track]]>':`Song ${i}`,artist:i===1?'<img src=x onerror="alert(1)">Artist':'Artist',imageUrl:null,stampDate:`2026-10-11T06:${String(45-i*5).padStart(2,'0')}:00+09:00`}));
+const songs=Array.from({length:7},(_,i)=>({title:i===0?'<![CDATA[Latest &amp; Track]]>':`Song ${i}`,artist:i===1?'<img src=x onerror="alert(1)">Artist':'Artist',imageUrl:'https://images.example/160.jpg',stampDate:`2026-10-11T06:${String(45-i*5).padStart(2,'0')}:00+09:00`}));
 const programData=stationId=>({stationId,currentProgram:{title:'<![CDATA[Music &amp; You]]>',performer:'DJ Test',startAt:'20261011060000',endAt:'20261011100000'},currentSong:emptySongs?null:songs[0],currentProgramSongs:emptySongs?[]:songs.slice(0,2),recentSongs:emptySongs?[]:songs});
 const reference='11111111-2222-4333-8444-555555555555';
 win.AbortSignal.any=AbortSignal.any;win.AbortSignal.timeout=AbortSignal.timeout;
@@ -32,6 +38,13 @@ try{
  await new Promise(r=>setTimeout(r,30));
  const q=id=>doc.getElementById(id);
  assert.ok(doc.querySelectorAll('.station-card').length>0);
+ // Offscreen images do not get a src until they approach the viewport.
+ const deferred=doc.querySelector('.station-logo img');
+ assert.equal(deferred.hasAttribute('src'),false);
+ onImages([{target:deferred,isIntersecting:false}]);assert.equal(deferred.hasAttribute('src'),false);
+ onImages([{target:deferred,isIntersecting:true}]);assert.match(deferred.src,/224x100\.png$/);
+ assert.equal(observedImages.has(deferred),false);
+ assert.ok([...observedImages].every(image=>image.isConnected));
  assert.equal(q('songs-station').textContent,'J-WAVE');
  assert.equal(doc.querySelector('#latest-song .song-title').textContent,'Latest & Track');
  assert.equal(doc.querySelectorAll('#song-history li').length,4);
@@ -42,6 +55,8 @@ try{
  q('songs-program').click();assert.equal(doc.querySelectorAll('#song-history li').length,1);
  assert.equal(q('songs-more').hidden,true);
  q('songs-station-scope').click();assert.equal(doc.querySelectorAll('#song-history li').length,4);
+ assert.ok([...observedImages].every(image=>image.isConnected));
+ const oldCover=doc.querySelector('#song-history img');
  q('theme').click();assert.equal(doc.documentElement.dataset.theme,'dark');
  q('theme').click();assert.equal(doc.documentElement.dataset.theme,'light');
  q('search').value='J-WAVE';q('search').dispatchEvent(new win.Event('input'));
@@ -67,6 +82,9 @@ try{
  assert.equal(doc.querySelectorAll('#song-history li').length,0);assert.match(q('songs-empty').textContent,/暂无/);
  assert.equal(q('songs-more').hidden,true);emptySongs=false;q('songs-refresh').click();await new Promise(r=>setTimeout(r,30));
  assert.equal(doc.querySelectorAll('#song-history li').length,4);
+ assert.equal(observedImages.has(oldCover),false);
+ // An already queued observer callback must not download a removed cover.
+ onImages([{target:oldCover,isIntersecting:true}]);assert.equal(oldCover.hasAttribute('src'),false);
  // A → B → A responses can arrive after abort. Never restore another station's
  // songs, or an older request for the same station.
  deferPrograms=true;q('tab-all').click();q('area').value='JP13';q('area').dispatchEvent(new win.Event('change'));
@@ -78,5 +96,6 @@ try{
  pendingPrograms[0].resolve(Response.json(programData('TBS')));pendingPrograms[1].resolve(Response.json(programData('FMJ')));await new Promise(r=>setTimeout(r,30));
  assert.equal(doc.querySelector('#latest-song .song-title').textContent,'Fresh TBS');
  assert.ok(q('songs-station').textContent.includes('TBS'));
+ assert.ok([...observedImages].every(image=>image.isConnected));
  console.log('DOM checks passed: playback, theme, favorites, song history scopes/expansion, JST, safe text, empty/error/retry and station-switch races.');
 }finally{await win.happyDOM.close();}
