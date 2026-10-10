@@ -1,0 +1,43 @@
+import {Window} from 'happy-dom';
+import {readFile} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
+import assert from 'node:assert/strict';
+const root=fileURLToPath(new URL('../',import.meta.url));
+const html=await readFile(root+'public/index.html','utf8');
+const js=await readFile(root+'public/app.js','utf8');
+const catalog=JSON.parse(await readFile(root+'lib/catalog.json','utf8')).bootstrap;
+const win=new Window({url:'https://radio.test',settings:{disableJavaScriptFileLoading:true,disableCSSFileLoading:true}});
+const doc=win.document;doc.write(html);
+win.Option=function(text,value){const option=doc.createElement('option');option.textContent=text;option.value=value;return option;};
+let sessions=0;
+win.AbortSignal.any=AbortSignal.any;win.AbortSignal.timeout=AbortSignal.timeout;
+win.AbortController=AbortController;
+win.fetch=async (url,options)=>{
+ if(url==='/api/bootstrap')return new Response(JSON.stringify(catalog),{headers:{'content-type':'application/json'}});
+ if(url.includes('now-playing'))return new Response(JSON.stringify({currentProgram:{title:'<![CDATA[Music &amp; You]]>',performer:'DJ Test',startAt:'20261010100000',endAt:'20261010110000'}}),{headers:{'content-type':'application/json'}});
+ if(url.includes('live-session')){sessions++;let stationId=JSON.parse(options.body).stationId;return new Response(JSON.stringify({stationId,streamUrl:'/sample.m3u8',expiresAtEpochMillis:Date.now()+55*60000}),{headers:{'content-type':'application/json'}})}
+ throw new Error(url);
+};
+win.HTMLMediaElement.prototype.canPlayType=()=> 'probably';
+win.HTMLMediaElement.prototype.play=async function(){this.dispatchEvent(new win.Event('playing'));};
+win.HTMLMediaElement.prototype.pause=function(){this.dispatchEvent(new win.Event('pause'));};
+win.HTMLMediaElement.prototype.load=function(){};
+try{
+ await win.eval(`(async()=>{${js}\n})()`);
+ const q=id=>doc.getElementById(id);
+ assert.ok(doc.querySelectorAll('.station-card').length>0);
+ q('theme').click();assert.equal(doc.documentElement.dataset.theme,'dark');
+ q('theme').click();assert.equal(doc.documentElement.dataset.theme,'light');
+ q('search').value='J-WAVE';q('search').dispatchEvent(new win.Event('input'));
+ assert.equal(doc.querySelectorAll('.station-card').length,1);
+ doc.querySelector('.favorite').click();assert.equal(q('favorite-count').textContent,'1');
+ q('area').value='JP1';q('area').dispatchEvent(new win.Event('change'));
+ q('tab-favorites').click();assert.equal(doc.querySelectorAll('.station-card').length,1);
+ q('hero-play').click();await new Promise(r=>setTimeout(r,30));
+ assert.equal(q('play-status').textContent,'正在直播');assert.equal(sessions,1);
+ q('hero-play').click();assert.equal(q('play-status').textContent,'已暂停');
+ q('player-sleep').click();doc.querySelector('[data-minutes="15"]').click();
+ assert.match(q('sleep-label').textContent,/15/);
+ assert.equal(q('program-title').textContent,'Music & You');
+ console.log('DOM checks passed: bootstrap, theme, search, favorites across regions, play/pause, sleep timer, CDATA metadata.');
+}finally{await win.happyDOM.close();}
