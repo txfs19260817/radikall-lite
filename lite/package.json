@@ -16,8 +16,8 @@
     "test:ui": "node test/ui.test.mjs"
   },
   "devDependencies": {
-    "typescript": "5.9.3",
     "@types/node": "24.10.0",
-    "happy-dom": "20.8.4"
+    "happy-dom": "20.8.4",
+    "typescript": "7.0.2"
   }
 }

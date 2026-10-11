@@ -1,5 +1,28 @@
 # Verification — 2026-10-10
 
+## TypeScript 7 native compiler
+
+- Upgraded the pinned `typescript` dependency and lockfile from 5.9.3 to 7.0.2,
+  the npm `latest` stable version verified on this date. This is the official Go
+  native compiler, distributed under the standard `typescript` package with the
+  `tsc` command; no preview package, Go toolchain or legacy compiler alias is needed.
+  See the [official release notes](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/).
+- A clean `npm ci`, type check, frontend build, all 19 backend/unit tests and DOM
+  checks passed under Node 24.21.0. Both import-extension options remain enabled.
+- Five direct compiler invocations per version on the same project and machine,
+  excluding npm startup: 5.9.3 = 1,881 / 2,036 / 1,806 / 1,870 / 1,806 ms;
+  7.0.2 = 438 / 425 / 440 / 477 / 406 ms. Median 1,870 → 438 ms (4.27× faster).
+  These are local developer-check timings, not website loading measurements.
+- A fresh isolated `@vercel/node` 23.0.1 build explicitly selected the 7.0.2
+  compiler executable and produced a `nodejs24.x` Lambda. Its actual compiled
+  API returned health 200, bootstrap 200 (109 stations), search 200 (12 results),
+  and FMJ/JP13 session → master → media → three consecutive audio segments, all
+  200. Each segment was read only up to 16 KiB and immediately cancelled; the
+  73-byte ID3 metadata prefix was followed by valid AAC ADTS headers. The temporary
+  verification secret existed only in process memory.
+- No browser assets or runtime dependencies changed in this compiler upgrade.
+  Production deployment and a native Linux build were not performed locally.
+
 ## Niconico entry, search and browser profiling
 
 The new source switch lazily imports the Niconico module. The native search-mode

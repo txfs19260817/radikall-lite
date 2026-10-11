@@ -29,6 +29,8 @@ npm start
 
 `npm run dev` 会构建前端并监视后端。修改 `src/` 中的浏览器模块后再次运行 `npm run build` 并刷新页面；这里刻意没有 HMR 开发服务器。
 
+类型检查使用 [TypeScript 7](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/) 的 Go 原生编译器，当前锁定最新稳定版 `7.0.2`，仍通过 `npm run check` / `tsc --noEmit` 执行。`npm ci` 自动安装当前平台的编译器，无需安装 Go。前端仍由 Node 去除类型；编译器不会下载到浏览器。Vercel 的 `@vercel/node` 23.0.1 原生编译路径已通过本地构建及真实上游播放链路验证。
+
 ## Niconico
 
 - 来源切换提供「电台 / Niconico」。视频编号模式支持 `sm` / `nm` / `so` 编号、频道数字编号和官方视频链接；标签搜索使用精确标签，关键词搜索匹配标题、简介和标签。
