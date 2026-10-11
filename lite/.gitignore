@@ -7,4 +7,5 @@ node_modules/
 .vercel/
 .netlify/
 public/app.js
+public/niconico.js
 *.log

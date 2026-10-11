@@ -1,6 +1,6 @@
 # Radikall Lite
 
-移动端优先的个人日本电台。原生网页、深色/浅色/系统主题、收藏、地区筛选、节目标题、底部播放器、睡眠定时与 Media Session 锁屏控制。
+移动端优先的个人日本电台。原生网页、深色/浅色/系统主题、收藏、地区筛选、节目标题、底部播放器、睡眠定时与 Media Session 锁屏控制。另有按需加载的 Niconico 视频入口和官方弹幕。
 
 这是 [baudmusic/radikall](https://github.com/baudmusic/radikall) 的轻量衍生版本。保留电台协议实现，把平台入口与 UI 分离；不依赖作者的公共 Worker。
 
@@ -27,7 +27,18 @@ npm start
 
 浏览器打开 `http://localhost:3000`。Windows PowerShell 用 `Copy-Item .env.example .env` 代替 `cp`。密钥只放 `.env` 或托管平台的环境变量，不提交 Git。
 
-`npm run dev` 会构建前端并监视后端。修改 `src/app.ts` 后再次运行 `npm run build` 并刷新页面；这里刻意没有 HMR 开发服务器。
+`npm run dev` 会构建前端并监视后端。修改 `src/` 中的浏览器模块后再次运行 `npm run build` 并刷新页面；这里刻意没有 HMR 开发服务器。
+
+## Niconico
+
+- 来源切换提供「电台 / Niconico」。视频编号模式支持 `sm` / `nm` / `so` 编号、频道数字编号和官方视频链接；标签搜索使用精确标签，关键词搜索匹配标题、简介和标签。
+- 搜索通过 `/api/niconico/search` 调用[官方 Snapshot Search API](https://site.nicovideo.jp/search-api-docs/snapshot)，每页 12 条、按播放量排序。搜索索引每日更新，结果和排序可能与官方实时搜索页不同。
+- 结果显示封面、标题、时长、投稿日期、播放量和评论数。只加载当前页及接近视口的封面；选择结果后才创建官方 iframe，弹幕、播放、全屏由官方播放器提供。
+- 电台首页不请求 Nico 模块或播放器。切换来源释放旧播放器并取消待完成的请求；返回电台需手动播放。电台睡眠定时在切换到 Nico 时清除，Nico 使用自己的播放控件。
+- 只在 localStorage 保存最多 8 个最近打开的视频 ID，可清空。不存搜索结果、视频或弹幕；搜索 JSON 为 `no-store`。官方 iframe 的资源缓存由 Niconico 和浏览器控制。
+- Nico 音视频不经过本站服务器，服务器仅转发受限大小的搜索 JSON。本入口不包含自动 UA 适配；受限内容可能需要在原站处理登录或访问限制。iframe 载入事件不能证明视频可播放，因此始终提供重新加载和原站链接。
+
+浏览器模块通过原有 Node 类型去除脚本构建，无新增运行时依赖。API 使用标准 Web API，与既有 Node、Vercel、Cloudflare、Netlify 入口共用。
 
 ## 部署
 

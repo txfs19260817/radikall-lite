@@ -16,7 +16,7 @@
   <script type="module" src="/app.js"></script>
 </head>
 <body>
-  <a class="skip" href="#stations">跳到电台列表</a>
+  <a id="skip-content" class="skip" href="#stations">跳到电台列表</a>
   <svg class="symbols" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
     <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z" fill="currentColor" stroke="none"/></symbol>
     <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14" stroke-width="4"/></symbol>
@@ -24,6 +24,7 @@
     <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></symbol>
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z"/></symbol>
     <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M12 17v4m-4 0h8"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="15" rx="3"/><path d="m8 2 4 4 4-4m-7 9h.01M15 13h.01M9 17h6"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
     <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
     <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
@@ -36,7 +37,9 @@
       <div class="header-right"><span class="tokyo"><span class="status-dot"></span>TOKYO <time id="tokyo-time">--:--</time></span><button id="theme" class="icon-button" aria-label="切换主题"><svg><use href="#i-moon"/></svg></button><button id="about" class="about-button" aria-label="打开使用说明">?</button></div>
     </header>
     <main>
-      <section class="intro"><p class="eyebrow">JAPAN, ON YOUR FREQUENCY.</p><h1>让声音，<span>陪你一会儿。</span></h1><p class="intro-copy">一座城市，一段旋律。打开你的口袋电台。</p></section>
+      <section class="intro"><p class="eyebrow">JAPAN, ON YOUR FREQUENCY.</p><h1>让声音，<span>陪你一会儿。</span></h1><p id="intro-copy" class="intro-copy">一座城市，一段旋律。打开你的口袋电台。</p></section>
+      <div class="source-switch" role="group" aria-label="选择来源"><button id="source-radio" type="button" aria-pressed="true" aria-controls="radio-view"><svg aria-hidden="true"><use href="#i-radio"/></svg>电台</button><button id="source-niconico" type="button" aria-pressed="false" aria-controls="nico-view"><svg aria-hidden="true"><use href="#i-video"/></svg>Niconico</button></div>
+      <div id="radio-view">
       <div class="main-grid">
         <section class="tuner" aria-label="当前电台">
           <div class="tuner-top"><span class="eyebrow">YOUR LITTLE ESCAPE</span><span class="on-air" id="on-air"><span></span>READY TO TUNE IN</span></div>
@@ -67,6 +70,22 @@
         <div class="filters"><label class="search"><svg><use href="#i-search"/></svg><input id="search" type="search" placeholder="搜索电台名称，例如 J-WAVE" aria-label="搜索电台" autocomplete="off"></label><label class="area-filter"><span>地区</span><select id="area" aria-label="选择地区"><option value="JP13">东京</option></select></label></div>
         <div id="page-message" class="message" role="status" hidden></div>
         <div id="station-grid" class="station-grid" aria-busy="true"><div class="loading-state">正在寻找好声音…</div></div>
+      </section>
+      </div>
+      <section id="nico-view" class="nico-view" aria-label="Niconico" hidden>
+        <div id="nico-module-error" class="message" role="status" hidden>入口暂时无法加载。<button id="nico-module-retry" type="button">重试</button></div>
+        <div class="nico-layout">
+          <form id="nico-form" class="nico-form" aria-label="打开或搜索 Niconico 视频">
+            <div class="nico-searchbar"><select id="nico-mode" aria-label="查找方式"><option value="video">视频编号</option><option value="tag">标签搜索</option><option value="keyword">关键词搜索</option></select><input id="nico-input" type="text" placeholder="sm1097445 或视频链接" aria-label="视频编号或链接" aria-describedby="nico-status" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="2048" required><button id="nico-go" type="submit" disabled>打开</button></div>
+            <p id="nico-status" class="nico-status" role="status"></p>
+          </form>
+          <div id="nico-watch" class="nico-watch">
+            <div id="nico-stage" class="nico-stage" aria-busy="false"><div id="nico-empty" class="nico-empty"><span class="nico-mark"><svg aria-hidden="true"><use href="#i-video"/></svg></span><h2>喜欢的音乐，熟悉的弹幕。</h2><p>打开一个视频，或搜索下一首喜欢的歌。</p></div></div>
+            <div id="nico-actions" class="nico-actions" hidden><span>弹幕与全屏可在播放器内切换</span><div><a id="nico-original" target="_blank" rel="noopener noreferrer">原站打开 ↗</a><button id="nico-retry" type="button">重新加载</button><button id="nico-close" type="button">关闭视频</button></div></div>
+          </div>
+          <aside class="nico-recent" aria-labelledby="nico-recent-heading"><div class="nico-recent-heading"><h2 id="nico-recent-heading">最近打开</h2><button id="nico-clear" type="button" disabled>清空</button></div><ol id="nico-history"></ol><p id="nico-history-empty" class="muted">喜欢的那首，下次继续。<br>最近打开的视频会留在这里。</p></aside>
+          <section id="nico-results" class="nico-results" aria-labelledby="nico-results-heading" aria-busy="false" hidden><div class="nico-results-heading"><h2 id="nico-results-heading">搜索结果</h2><span id="nico-result-count" class="muted"></span></div><p id="nico-search-status" class="nico-status" role="status"></p><ol id="nico-result-list" class="nico-result-list"></ol><nav id="nico-pages" class="nico-pages" aria-label="搜索结果分页" hidden><button id="nico-prev" type="button">上一页</button><span id="nico-page"></span><button id="nico-next" type="button">下一页</button></nav><p class="nico-search-note muted">数据来自 Niconico 公开搜索 · 按播放量排序，每日更新</p></section>
+        </div>
       </section>
       <footer class="footer"><span>RADIKALL LITE <span class="footer-dot">·</span> YOUR POCKET RADIO</span><a href="https://github.com/baudmusic/radikall" target="_blank" rel="noopener noreferrer">Based on Radikall ↗</a></footer>
     </main>

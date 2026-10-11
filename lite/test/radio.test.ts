@@ -185,6 +185,9 @@ test('Node host serves the interface and API, never private source files', async
   try {
     assert.ok((await (await fetch(base)).text()).includes('Radikall Lite'));
     assert.equal((await fetch(`${base}/api/bootstrap`)).status, 200);
+    const nicoModule = await fetch(`${base}/niconico.js`);
+    assert.equal(nicoModule.status, 200); assert.match(nicoModule.headers.get('content-type') ?? '', /javascript/);
+    assert.ok((await nicoModule.text()).includes('export function createNiconico'));
     for (const path of ['/.env', '/lib/catalog.json', '/package.json', '/missing']) assert.equal((await fetch(base + path)).status, 404);
     assert.equal((await fetch(base, { method: 'HEAD' })).status, 200);
   } finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }

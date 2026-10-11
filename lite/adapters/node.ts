@@ -10,6 +10,7 @@ const root = new URL('../public/', import.meta.url);
 const files: Record<string, string> = {
   '/': 'text/html; charset=utf-8', '/index.html': 'text/html; charset=utf-8',
   '/app.js': 'text/javascript; charset=utf-8', '/styles.css': 'text/css; charset=utf-8',
+  '/niconico.js': 'text/javascript; charset=utf-8',
   '/manifest.webmanifest': 'application/manifest+json', '/icon.svg': 'image/svg+xml',
   '/icon-192.png': 'image/png', '/icon-512.png': 'image/png',
   '/vendor/hls.min.js': 'text/javascript; charset=utf-8',

@@ -1,5 +1,64 @@
 # Verification — 2026-10-10
 
+## Niconico entry, search and browser profiling
+
+The new source switch lazily imports the Niconico module. The native search-mode
+select offers video ID/link, exact tag and keyword search. The server calls the
+[official Snapshot Search API](https://site.nicovideo.jp/search-api-docs/snapshot)
+with a fixed host, 12-result page, 15-second timeout and 256 KiB response limit.
+Search results use text nodes and validated thumbnail hosts; upstream errors
+retain the existing redacted diagnostics and request IDs. This daily index and
+view-count sort differ from the official site's real-time search/ranking.
+
+- Node 24.21.0: type check, build, 19 backend/unit tests and the DOM suite passed.
+  Tests include search validation/body limits, stale-request cancellation,
+  title injection, replacing pages, bounded history and iframe cleanup.
+- Chrome 154 in an isolated headless profile: real tag/keyword queries, paging,
+  empty results, injected HTTP 503 followed by retry, invalid input and rapid
+  source switching passed with no page errors. Only the injected 503 failed.
+- Real official `sm1097445` embed played for 67.98 seconds with visible danmaku,
+  `readyState=4`, `paused=false` and no media error. Switching to radio removed
+  the frame and stopped new Nico requests. Real FMJ audio then started; switching
+  back removed its audio source and stopped new radio playback requests.
+- Widths 320, 390, 768, 1024 and 1440 had no horizontal overflow. Dark, light and
+  system theme changes passed; system retains its distinct monitor icon. The
+  desktop and mobile-width screenshots were visually reviewed.
+- A separate 390×844/DPR 3 Android-UA touch-emulation context searched and played
+  video with danmaku (5.64 seconds observed, no media error). Closing released the
+  iframe. Injecting a failed module fetch exposed Chrome's cached import failure;
+  explicit retries now use a fresh URL, and this same browser test passed.
+- A fresh `@vercel/node` 23.0.1 build loaded its compiled Node 24 API: health 200,
+  search 200 with 12 results. No production environment variables were pulled.
+
+Loading measurements used cold isolated Chrome contexts, fixed radio metadata,
+real external images and an unthrottled local Node server. Compared with the
+previous artwork version, the combined gzip size of initial HTML/CSS/JS grew
+from 19,075 to 21,923 bytes (about 2.8 KB); the extra Nico module is 3,833 bytes
+gzip and loads only after choosing Nico. Neither initial radio view made any
+Nico-module, search or embed request. The new source control moves one logo
+below the image-loading threshold, so request-count differences also reflect
+the changed layout.
+
+| Viewport | Previous LCP | With Nico entry | Initial requests |
+| --- | ---: | ---: | --- |
+| 390×844 | 1,356 ms | 1,268 ms | 10 → 9 |
+| 1440×844 | 940 ms | 884 ms | 11 → 10 |
+
+These single-run timings are local observations, not a production speed claim.
+One tag search displayed 12 rows after 866 ms and downloaded about 37 KB including
+seven nearby covers; its server JSON was 3,197 bytes with `Cache-Control: no-store`.
+Pagination replaces the previous page, and offscreen covers wait until near the
+viewport. Only eight recent IDs are stored locally. No media/comment downloads,
+search-result storage, offline cache or service worker were added by the app;
+the official iframe and image HTTP cache remain browser/provider-controlled.
+Nico media goes directly to Nico, so only search metadata uses this site's API.
+These byte counts are test observations, not Vercel billing totals.
+
+Browser app/API requests were fulfilled from the local server under a simulated
+HTTPS origin; the external Nico player and media were real. No UA adaptation was
+added. Physical phones, iOS/Safari, account-restricted videos and production have
+not been verified. Publication remains the user's Git push.
+
 ## Asset loading and mobile storage
 
 The production audit found 19 image requests before scrolling, including 500px

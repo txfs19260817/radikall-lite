@@ -1,4 +1,5 @@
 import type { BootstrapResponse, StationSummary, NowPlayingResponse, ProgramEntry, OnAirSong } from '../lib/types.ts';
+import type { NiconicoSearchResult } from '../lib/niconico.ts';
 
 type Theme = 'system' | 'dark' | 'light';
 type Playback = { kind: 'idle' | 'loading' | 'playing' | 'paused' } | { kind: 'error'; message: string };
@@ -36,6 +37,12 @@ let metadataAbort: AbortController | undefined;
 let hls: HlsInstance | undefined;
 let renewTimer: ReturnType<typeof setTimeout> | undefined;
 let sleepDeadline = 0;
+const SOURCES = { radio: 'radio', niconico: 'niconico' } as const;
+let source: typeof SOURCES[keyof typeof SOURCES] = 'radio';
+let sourceGeneration = 0;
+let niconico: ReturnType<typeof import('./niconico.js').createNiconico> | undefined;
+let nicoLoading: Promise<typeof import('./niconico.js')> | undefined;
+let nicoLoadFailures = 0;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 const icon = (name: string) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const nameForArea = (id: string) => state.data?.prefectures.find(area => area.id === id)?.names['zh-CN'] ?? id;
@@ -188,18 +195,20 @@ function selectStation(station: StationSummary) {
   $('selected-area').textContent = `${nameForArea(station.areaIds[0]!)} / JAPAN LIVE`;
   $('mini-name').textContent = station.name;
   replaceContent($('mini-logo'), logo(station, 'mini-logo'));
-  $('player-bar').hidden = false; $<HTMLButtonElement>('hero-play').disabled = false;
+  $('player-bar').hidden = source !== 'radio'; $<HTMLButtonElement>('hero-play').disabled = false;
   $('program-title').textContent = '正在获取节目信息…'; $('program-time').textContent = 'LIVE RADIO / ラジオ';
   $('program-detail').innerHTML = '<p class="muted">正在获取节目信息…</p>';
   renderProgramArtwork();
   renderStations(); updateFavorite(); updateMediaSession(); void updateProgram();
 }
 function updateMediaSession(program?: ProgramEntry | null) {
+  if (source !== 'radio') return;
   if (!('mediaSession' in navigator) || !state.selected) return;
   navigator.mediaSession.metadata = new MediaMetadata({ title: program ? cleanText(program.title) : state.selected.name,
     artist: state.selected.name, album: 'Radikall Lite', artwork: [{ src: state.selected.logoUrl, sizes: '224x100', type: 'image/png' }] });
 }
 async function updateProgram() {
+  if (source !== 'radio') return;
   const station = state.selected; if (!station) return;
   metadataAbort?.abort(); metadataAbort = new AbortController();
   const signal = metadataAbort.signal;
@@ -321,6 +330,7 @@ async function selectAndPlay(station: StationSummary) {
   await start();
 }
 async function start(force = false) {
+  if (source !== 'radio') return;
   const station = state.selected; if (!station) return;
   if (sleepDeadline && sleepDeadline <= Date.now()) { stopForSleep(); return; }
   const ticket = ++generation; sessionAbort?.abort(); sessionAbort = new AbortController();
@@ -369,13 +379,15 @@ audio.addEventListener('error', () => {
   state.session = null; reportError(new Error('音频暂时无法播放，请点击播放重试。'), playbackId);
 });
 audio.addEventListener('timeupdate', () => { if (sleepDeadline && Date.now() >= sleepDeadline) stopForSleep(); });
-if ('mediaSession' in navigator) {
+function registerMediaActions(enabled: boolean) {
+  if (!('mediaSession' in navigator)) return;
   for (const [action, callback] of Object.entries({ play: () => { void start(); }, pause, stop: pause })) {
-    try { navigator.mediaSession.setActionHandler(action as MediaSessionAction, callback); } catch { /* Optional on older browsers. */ }
+    try { navigator.mediaSession.setActionHandler(action as MediaSessionAction, enabled ? callback : null); } catch { /* Optional on older browsers. */ }
   }
 }
+registerMediaActions(true);
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) return;
+  if (document.hidden || source !== 'radio') return;
   if (sleepDeadline && Date.now() >= sleepDeadline) { stopForSleep(); return; }
   if (state.phase.kind === 'playing' && state.session && state.session.expiresAtEpochMillis < Date.now() + 5 * 60_000) void start(true);
   void updateProgram();
@@ -398,6 +410,38 @@ $('theme').addEventListener('click', () => {
   toast(`主题：${({ system: '跟随系统', dark: '深色', light: '浅色' } as const)[theme]}`);
 });
 systemTheme.addEventListener('change', applyTheme); applyTheme();
+async function selectSource(next: typeof source) {
+  const ticket = ++sourceGeneration;
+  source = next; document.body.dataset.source = next;
+  $('radio-view').hidden = next !== 'radio'; $('nico-view').hidden = next !== 'niconico';
+  for (const name of Object.values(SOURCES)) $(`source-${name}`).setAttribute('aria-pressed', String(name === next));
+  const skip = $<HTMLAnchorElement>('skip-content');
+  skip.href = next === 'radio' ? '#stations' : '#nico-input'; skip.textContent = next === 'radio' ? '跳到电台列表' : '跳到视频搜索';
+  $('intro-copy').textContent = next === 'radio' ? '一座城市，一段旋律。打开你的口袋电台。' : '从一首歌，到满屏的共鸣。';
+  if (next === 'radio') {
+    niconico?.destroy(); $('player-bar').hidden = !state.selected;
+    registerMediaActions(true); updateMediaSession(); void updateProgram(); return;
+  }
+  pause(); metadataAbort?.abort(); sleepDeadline = 0; tick();
+  $('player-bar').hidden = true; registerMediaActions(false);
+  if ('mediaSession' in navigator) { navigator.mediaSession.metadata = null; navigator.mediaSession.playbackState = 'none'; }
+  if (niconico) return;
+  $('nico-module-error').hidden = true; $('nico-view').setAttribute('aria-busy', 'true');
+  try {
+    // Browsers cache failed module fetches too. Only an explicit retry after a
+    // failure needs a fresh URL; normal visits share the same loaded module.
+    const module: typeof import('./niconico.js') = await (nicoLoading ??= import(nicoLoadFailures ? `./niconico.js?retry=${nicoLoadFailures}` : './niconico.js').catch(error => { nicoLoading = undefined; nicoLoadFailures++; throw error; }));
+    if (ticket !== sourceGeneration || source !== 'niconico') return;
+    niconico = module.createNiconico($('nico-view'), {
+      search: (query, mode, page, signal) => api<NiconicoSearchResult>(`/api/niconico/search?${new URLSearchParams({ q: query, mode, page: String(page) })}`, { signal }),
+      deferImage, replaceContent,
+    });
+    $<HTMLButtonElement>('nico-go').disabled = false;
+  } catch { if (ticket === sourceGeneration) $('nico-module-error').hidden = false; }
+  finally { if (ticket === sourceGeneration) $('nico-view').setAttribute('aria-busy', 'false'); }
+}
+for (const name of Object.values(SOURCES)) $(`source-${name}`).addEventListener('click', () => { if (source !== name) void selectSource(name); });
+$('nico-module-retry').addEventListener('click', () => { void selectSource('niconico'); });
 function tick() {
   $('tokyo-time').textContent = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
   if (sleepDeadline && Date.now() >= sleepDeadline) stopForSleep();
