@@ -29,6 +29,8 @@ npm start
 
 `npm run dev` 会构建前端并监视后端。修改 `src/app.ts` 后再次运行 `npm run build` 并刷新页面；这里刻意没有 HMR 开发服务器。
 
+类型检查使用 [TypeScript 7](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/) 的 Go 原生编译器，当前锁定 `7.0.2`，仍通过 `npm run check` / `tsc --noEmit` 执行。`npm ci` 自动安装当前平台的编译器，无需安装 Go。前端仍由 Node 去除类型；编译器不会下载到浏览器。`tsconfig.json` 显式启用 Node 类型，以适配新版编译器。
+
 ## 部署
 
 完整步骤见 [docs/DEPLOY.zh-CN.md](docs/DEPLOY.zh-CN.md)。所有平台设置同一个环境变量：

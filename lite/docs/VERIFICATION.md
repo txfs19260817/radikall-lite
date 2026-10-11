@@ -1,5 +1,24 @@
 # Verification — 2026-10-10
 
+## TypeScript 7 native compiler — radio application
+
+- Keep the compiler pinned to TypeScript 7.0.2. Explicit `types: ["node"]`
+  makes server types independent of test-library imports. An explicit relative
+  `typeRoots` also resolves them when Vercel extends this config from a temporary
+  compiler directory. Both relative import-extension options remain enabled.
+- Node 24.21.0: type check, frontend build, 14 backend tests and DOM checks passed.
+- A fresh `@vercel/node` 23.0.1 build used the native compiler without TypeScript
+  diagnostics. Its compiled API loaded under Node 24: health, bootstrap (109
+  stations), FMJ session, master and media playlists, and three consecutive
+  audio segments returned 200. Each bounded 16 KiB segment read contained an
+  ID3 prefix followed by valid ADTS audio framing; readers were cancelled.
+- Isolated Chrome 154: local J-WAVE playback advanced past three seconds with
+  readyState 4, then paused successfully. Song history remained available.
+  System light/dark switching and its monitor icon worked; widths 320, 390,
+  768 and 1440 had no horizontal overflow or page errors. This was a short
+  desktop-browser smoke test, not a new physical-device or 60-second test.
+- Local validation only; no production deployment was performed.
+
 ## Asset loading and mobile storage
 
 The production audit found 19 image requests before scrolling, including 500px
