@@ -6,10 +6,11 @@ import { buildLiveStreamUrl } from './stream.ts';
 import { fetchUpstream, isAllowedUrl } from './network.ts';
 import type { PlaybackTokenPayload } from './types.ts';
 import { atStage, logFailure, noteResponse, StageError, type Diagnostic } from './diagnostics.ts';
+import { searchNiconico, NiconicoSearchError } from './niconico.ts';
 
 export type Settings = { RADIKALL_SESSION_SECRET?: string };
 const TTL = 55 * 60_000;
-const deps = { authenticate, buildLiveStreamUrl, buildNowPlayingResponse, buildScheduleResponse, fetchUpstream };
+const deps = { authenticate, buildLiveStreamUrl, buildNowPlayingResponse, buildScheduleResponse, fetchUpstream, searchNiconico };
 type Dependencies = typeof deps;
 const json = (body: unknown, status = 200, cache = 'no-store') => Response.json(body, {
   status, headers: { 'Cache-Control': cache, 'X-Content-Type-Options': 'nosniff' },
@@ -78,6 +79,13 @@ export function createHandler(overrides: Partial<Dependencies> = {}) {
       const url = new URL(request.url), path = url.pathname;
       if (path === '/health' || path === '/api/health') return json({ status: 'ok', configured: (env.RADIKALL_SESSION_SECRET?.length ?? 0) >= 32 });
       if (path === '/api/bootstrap' && request.method === 'GET') return json(bootstrapData, 200, 'public, max-age=3600');
+      if (path === '/api/niconico/search' && request.method === 'GET') {
+        trace.stage = 'niconico search';
+        const mode = url.searchParams.get('mode'), query = url.searchParams.get('q') ?? '';
+        const page = url.searchParams.get('page') ?? '0';
+        if (!['tag', 'keyword'].includes(mode ?? '') || !/^\d{1,4}$/.test(page) || Number(page) > 8333 || !query.trim() || query.length > 120) throw new HttpError(400, '请输入有效的关键词、搜索方式和页码。');
+        return json(await services.searchNiconico(query, mode === 'tag' ? 'tag' : 'keyword', Number(page), request.signal, trace));
+      }
       const program = path.match(/^\/api\/stations\/([^/]+)\/(now-playing|schedule)$/);
       if (program && request.method === 'GET') {
         const id = decodeURIComponent(program[1]!);
@@ -126,10 +134,11 @@ export function createHandler(overrides: Partial<Dependencies> = {}) {
       return json({ message: '找不到这个接口。' }, 404);
     } catch (error) {
       const cause = error instanceof StageError ? error.cause : error;
-      const status = cause instanceof HttpError ? cause.status : 502;
+      const known = cause instanceof HttpError || cause instanceof NiconicoSearchError;
+      const status = known ? cause.status : 502;
       if (status >= 500) logFailure(trace, error);
       // Never display upstream HTML, authentication tokens or full proxy URLs.
-      const response = json({ message: cause instanceof HttpError ? cause.message : '暂时无法连接电台服务，请稍后重试。', requestId: trace.requestId }, status);
+      const response = json({ message: known ? cause.message : trace.stage === 'niconico search' ? 'Niconico 搜索暂时不可用，请稍后重试。' : '暂时无法连接电台服务，请稍后重试。', requestId: trace.requestId }, status);
       response.headers.set('X-Request-ID', trace.requestId);
       return response;
     }
