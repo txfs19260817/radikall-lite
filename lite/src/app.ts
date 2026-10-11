@@ -389,7 +389,7 @@ function applyTheme() {
   const resolved = theme === 'system' ? (systemTheme.matches ? 'dark' : 'light') : theme;
   document.documentElement.dataset.theme = resolved;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolved === 'dark' ? '#101412' : '#f5f5ee');
-  $('theme').innerHTML = icon(resolved === 'dark' ? 'moon' : 'sun');
+  $('theme').innerHTML = icon(theme === 'system' ? 'monitor' : theme === 'dark' ? 'moon' : 'sun');
   const names = { system: '跟随系统', dark: '深色', light: '浅色' };
   $('theme').setAttribute('aria-label', `当前${names[theme]}，点击切换主题`);
 }
