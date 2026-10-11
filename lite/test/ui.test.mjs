@@ -57,8 +57,9 @@ try{
  q('songs-station-scope').click();assert.equal(doc.querySelectorAll('#song-history li').length,4);
  assert.ok([...observedImages].every(image=>image.isConnected));
  const oldCover=doc.querySelector('#song-history img');
- q('theme').click();assert.equal(doc.documentElement.dataset.theme,'dark');
- q('theme').click();assert.equal(doc.documentElement.dataset.theme,'light');
+ assert.equal(q('theme').querySelector('use').getAttribute('href'),'#i-monitor');
+ q('theme').click();assert.equal(doc.documentElement.dataset.theme,'dark');assert.equal(q('theme').querySelector('use').getAttribute('href'),'#i-moon');
+ q('theme').click();assert.equal(doc.documentElement.dataset.theme,'light');assert.equal(q('theme').querySelector('use').getAttribute('href'),'#i-sun');
  q('search').value='J-WAVE';q('search').dispatchEvent(new win.Event('input'));
  assert.equal(doc.querySelectorAll('.station-card').length,1);
  doc.querySelector('.favorite').click();assert.equal(q('favorite-count').textContent,'1');
